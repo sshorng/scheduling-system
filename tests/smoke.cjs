@@ -805,7 +805,7 @@ check('Subject relation soft rule is wired end to end', () => {
   if (!backend.includes("'科目關係':")) throw new Error('subject relation sheet definition missing');
   if (!backend.includes("headers: ['規則ID', '科目A', '科目B', '適用年級', '適用班級', '備註']")) throw new Error('subject relation schema missing');
   if (!backend.includes("subjectRelations:   sheetToObjects_(ss.getSheetByName('科目關係'))")) throw new Error('getAll does not return subject relations');
-        if (!backend.includes("const GAS_VERSION = '20260826_v1209_schedule_core';")) throw new Error('GAS version marker missing');
+  if (!backend.includes("const GAS_VERSION = '20260826_v1212_export_excludes_preplanned';")) throw new Error('GAS version marker missing');
   if (!backend.includes('function saveSubjectRelation_(ss, p)')) throw new Error('atomic subject relation save missing');
   if (!backend.includes("case 'saveSubjectRelation': result = saveSubjectRelation_(ss, payload); break;")) throw new Error('subject relation save route missing');
   for (const marker of [
@@ -863,7 +863,7 @@ check('Subject relation warning respects class scope', () => {
   if (context.getSubjectRelationWarnings(2, '國文', '701', schedule).length !== 1) throw new Error('綁班不應停用同班科目關係');
 });
 check('Frontend and backend versions use a handshake', () => {
-    if (!app.includes("const FRONTEND_VERSION = '20260826_v1209_schedule_core';")) throw new Error('frontend version marker missing');
+  if (!app.includes("const FRONTEND_VERSION = '20260826_v1212_export_excludes_preplanned';")) throw new Error('frontend version marker missing');
   if (!app.includes('res.data.gasVersion')) throw new Error('frontend does not read GAS version');
   if (!app.includes('前後端版本不同')) throw new Error('version mismatch warning missing');
   if (!backend.includes('gasVersion:          GAS_VERSION')) throw new Error('GAS getAll version missing');
@@ -2693,6 +2693,27 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
     if (!ctx.isExportBoundCourse_({ '班級代碼': '701', '科目代碼': '體育' }, bindGroups)) throw new Error('綁班課程未被辨識');
     const plannedAssignments = [{ '班級代碼': '901', '科目代碼': '課輔', '課程屬性': '預排' }];
     if (!ctx.isExportPreplannedCourse_({ '班級代碼': '901', '科目代碼': '課輔' }, plannedAssignments)) throw new Error('預排課程未被辨識');
+    if (!backend.includes('filter(scheduleRow => !isExportPreplannedCourse_(scheduleRow, assignments))')) throw new Error('課表匯出未排除預排課程');
+    const exportSheets = {
+      '課表': [
+        { '課表ID': 'PRE-ASSIGNMENT', '班級代碼': '901', '星期': '1', '節次': '1', '科目代碼': '課輔', '教師姓名': 'T1', '課堂屬性': '一般' },
+        { '課表ID': 'PRE-ROW', '班級代碼': '902', '星期': '1', '節次': '2', '科目代碼': '數學', '教師姓名': 'T1', '課堂屬性': '預排' },
+        { '課表ID': 'LIVE', '班級代碼': '903', '星期': '1', '節次': '3', '科目代碼': '英語', '教師姓名': 'T1', '課堂屬性': '一般' }
+      ],
+      '配課': [{ '班級代碼': '901', '科目代碼': '課輔', '課程屬性': '預排' }],
+      '教師': [{ '教師姓名': 'T1', 'Email': 't1@example.com' }],
+      '班級': [{ '班級代碼': '901' }, { '班級代碼': '902' }, { '班級代碼': '903' }],
+      '綁班': [],
+      '配色': []
+    };
+    ctx.sheetToObjects_ = sheet => exportSheets[sheet.name] || [];
+    ctx.getSettingsMap_ = () => ({ '學期代號': '115-1' });
+    ctx.writeExportSheet_ = (_ss, _name, headers, rows) => ({ headers, rows });
+    const exportFunctionStart = backend.indexOf('function exportSchedule_(ss)');
+    const exportFunctionEnd = backend.indexOf('function exportPatrolSchedule_', exportFunctionStart);
+    vm.runInContext(backend.slice(exportFunctionStart, exportFunctionEnd), ctx, { filename: 'schedule-export.js' });
+    const exportResult = ctx.exportSchedule_({ getSheetByName: name => ({ name }) });
+    if (exportResult.rows.length !== 1 || exportResult.rows[0][1] !== 'LIVE') throw new Error('課表匯出仍包含預排課程');
     const specialTags = ctx.exportScheduleSpecialTags_({ '班級代碼': '701', '科目代碼': '體育' }, bindGroups, []);
     if (specialTags !== '併班、綁課') throw new Error('綁班特殊標記未完整匯出：' + specialTags);
     const usedExportIds = new Set();

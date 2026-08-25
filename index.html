@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260826_v1209_schedule_core">
+    <link rel="stylesheet" href="style.css?v=20260826_v1212_export_excludes_preplanned">
 </head>
 <body>
 
@@ -798,7 +798,7 @@
     </div>
     <div class="panel-card">
       <div class="panel-title">📤 匯出至調代課系統</div>
-       <p class="text-muted mb-3">匯出格式與調代課系統欄位完全相容（學期代號／教師Email／星期數字／課堂屬性／特殊標記）。特殊課程會保留併班、綁課、抽離、超鐘點、預排等識別。<br>建議順序：先匯出<b>教師名單</b>，至調代課系統先「匯入教師」，再匯出並匯入<b>課表</b>。</p>
+        <p class="text-muted mb-3">匯出格式與調代課系統欄位完全相容（學期代號／教師Email／星期數字／課堂屬性／特殊標記）。併班、綁課、抽離與超鐘點等識別會保留；下學期預排課程不會匯出。<br>建議順序：先匯出<b>教師名單</b>，至調代課系統先「匯入教師」，再匯出並匯入<b>課表</b>。</p>
       <div class="d-flex" style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-primary" onclick="doExportTeachers()">📥 匯出教師名單至試算表</button>
         <button class="btn btn-primary" onclick="doExport()">📤 匯出課表至試算表</button>
@@ -1067,7 +1067,7 @@
 <script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.4/dist/pizzip.min.js"></script>
 <script src="https://unpkg.com/file-saver@2.0.5/dist/FileSaver.min.js"></script>
    <script src="word-export.js?v=20260825_v1211_class_subject_phrase_breaks"></script>
-   <script src="app.js?v=20260826_v1209_schedule_core"></script>
-   <script src="app-runtime.js?v=20260826_v1209_schedule_core"></script>
+   <script src="app.js?v=20260826_v1212_export_excludes_preplanned"></script>
+   <script src="app-runtime.js?v=20260826_v1212_export_excludes_preplanned"></script>
 </body>
 </html>

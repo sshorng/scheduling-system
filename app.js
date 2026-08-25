@@ -1016,7 +1016,7 @@ function compressSlots(slots) {
 // GAS URL（契約 §3.C 三層優先序）
 // ============================================================
 const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycby8i5bnQ-oKZMO1HUQO6pJF6f_XQL8bQHO2Yj3nJ2D7NCzNZbe_bhks8hxTVZWWSxz7/exec";  // 已鎖定部署網址
-const FRONTEND_VERSION = '20260826_v1209_schedule_core';
+const FRONTEND_VERSION = '20260826_v1212_export_excludes_preplanned';
 
 function resolveGasUrl() {
   if (DEFAULT_GAS_URL && DEFAULT_GAS_URL.trim()) return DEFAULT_GAS_URL.trim();

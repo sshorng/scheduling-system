@@ -11,7 +11,7 @@
 
 // ===================== 工作表定義 =====================
 
-const GAS_VERSION = '20260826_v1209_schedule_core';
+const GAS_VERSION = '20260826_v1212_export_excludes_preplanned';
 const SCHEMA_VERSION = '20260826_bilingual_course_v5';
 
 // 所有會改動試算表的動作共用同一把 ScriptLock，避免多視窗或快速連點互相覆寫。
@@ -1799,6 +1799,8 @@ function isExportBoundCourse_(scheduleRow, blockGroups) {
 
 function isExportPreplannedCourse_(scheduleRow, assignments) {
   if (!scheduleRow) return false;
+  if ([scheduleRow['課程屬性'], scheduleRow['課堂屬性']]
+    .some(value => String(value || '').trim() === '預排')) return true;
   const classCode = String(scheduleRow['班級代碼'] || '').trim();
   const subjectCode = String(scheduleRow['科目代碼'] || '').trim();
   if (!classCode || !subjectCode) return false;
@@ -1832,10 +1834,11 @@ function exportScheduleRowId_(scheduleRow, semesterId, scheduleIndex, teacherCou
 }
 
 function exportSchedule_(ss) {
-  const schedule = sheetToObjects_(ss.getSheetByName('課表'));
+  const assignments = sheetToObjects_(ss.getSheetByName('配課'));
+  const schedule = sheetToObjects_(ss.getSheetByName('課表'))
+    .filter(scheduleRow => !isExportPreplannedCourse_(scheduleRow, assignments));
   const teachers = sheetToObjects_(ss.getSheetByName('教師'));
   const classes = sheetToObjects_(ss.getSheetByName('班級'));
-  const assignments = sheetToObjects_(ss.getSheetByName('配課'));
   const blockGroups = sheetToObjects_(ss.getSheetByName('綁班'));
   const colorRules = sheetToObjects_(ss.getSheetByName('配色'));
   const settings = getSettingsMap_(ss);

@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<!--
+  排課系統 index.html
+  亮色系主題、兩欄課表、拖曳排課、衝突偵測
+-->
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:,">
+  <title>排課系統</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20260824_v1208_schedule_exceptions">
+</head>
+<body>
+
+<!-- ===== Top Bar ===== -->
+<div id="topbar">
+  <div id="brand">📅 排課系統</div>
+  <div id="tabs">
+    <button class="tab-btn active" data-tab="timetable">🗓 課表</button>
+    <button class="tab-btn" data-tab="config">📋 配課</button>
+     <button class="tab-btn" data-tab="constraints">⛔ 限制</button>
+     <button class="tab-btn" data-tab="stats">📊 統計</button>
+     <button class="tab-btn" data-tab="exceptions">📅 日期調整</button>
+     <button class="tab-btn" data-tab="room">🏫 教室</button>
+  </div>
+  <div id="topbar-right">
+    <div id="status-dot" title="連線狀態"></div>
+    <div class="icon-btn" id="__sheetLink" title="開啟試算表" style="display:none;">📊</div>
+    <button class="btn btn-success btn-sm" id="__autoScheduleBtn" onclick="openAutoScheduleModal()" style="font-weight:bold;margin-right:4px;">🤖 自動排課</button>
+    <button class="btn btn-primary btn-sm" onclick="openWordExportModal()" style="font-weight:bold;margin-right:4px;background:#7c3aed;">📄 匯出 Word</button>
+    <button class="btn btn-danger btn-sm" onclick="clearUnlockedSchedule()" style="font-weight:bold;margin-right:4px;">🗑 清除排課</button>
+    <div class="icon-btn" id="__settingsBtn" title="連線設定">⚙️</div>
+  </div>
+</div>
+
+<!-- ===== Main ===== -->
+<div id="main">
+
+  <!-- ── Tab 0：課表 ── -->
+  <div class="tab-panel active" id="panel-timetable">
+    <div class="tt-layout-toolbar">
+      <div class="tt-layout-toolbar-main">
+        <div class="tt-layout-toolbar-copy">
+          <strong>課表比對工作台</strong>
+          <span>左欄班級、右欄教師，必要時再展開第三欄比較其他班級、教師或教室。</span>
+        </div>
+        <button class="btn btn-primary btn-sm" id="toggle-third-timetable" type="button">＋ 開啟第三課表</button>
+      </div>
+      <div class="third-card-header third-layout-header" id="third-timetable-header" hidden>
+        <div>
+          <div class="third-card-kicker">第三課表</div>
+          <div class="third-card-title">多方比對</div>
+        </div>
+        <button class="icon-btn third-close-btn" id="close-third-timetable" type="button" title="關閉第三課表">✕</button>
+      </div>
+    </div>
+    <div id="tt-layout">
+      <!-- 左欄：班級課表 -->
+      <div class="tt-card" id="class-card">
+        <div class="tt-card-header">
+          <label for="sel-class">班級</label>
+          <select id="sel-class"><option value="">請選擇班級</option></select>
+          <span class="tt-card-title" id="class-label"></span>
+        </div>
+        <!-- 班級待排科目面板 -->
+        <div class="subject-palette" id="subject-palette-box" style="margin:8px 12px;box-shadow:none;border:1px solid var(--border);">
+          <div class="palette-header">
+            <span>📦 班級待排科目（按住卡片直接拖曳至班級課表）</span>
+            <span class="text-muted" id="palette-class-info" style="font-weight:normal;">請選擇班級</span>
+          </div>
+          <div class="palette-list" id="palette-list">
+            <span class="text-muted" style="font-size:12px;">選擇班級後，此處將自動列出該班配課科目與剩餘節數…</span>
+          </div>
+        </div>
+        <div class="tt-scroll">
+          <div id="class-tt">
+            <p style="padding:20px;color:var(--muted);font-size:13px;">請先選擇班級</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右欄：教師課表 -->
+      <div class="tt-card" id="teacher-card">
+        <div class="tt-card-header">
+          <label for="sel-teacher">教師</label>
+          <input id="sel-teacher" type="text" placeholder="— 選擇教師 —" list="dl-teachers" style="width:180px;" onchange="onTeacherSelectChange(this.value)">
+        </div>
+        <div class="teacher-timetable-subheader">
+          <span class="tt-card-title" id="teacher-label"></span>
+        </div>
+        <!-- 教師授課科目面板 -->
+        <div class="subject-palette" id="teacher-palette-box" style="margin:8px 12px;box-shadow:none;border:1px solid var(--border);">
+          <div class="palette-header">
+            <span>📦 教師授課科目（按住卡片拖曳至該師任教班級課表）</span>
+            <span class="text-muted" id="palette-teacher-info" style="font-weight:normal;">請選擇教師</span>
+          </div>
+          <div class="palette-list" id="teacher-palette-list">
+            <span class="text-muted" style="font-size:12px;">選擇教師後，此處將自動列出該師授課班級與剩餘節數…</span>
+          </div>
+        </div>
+        <div class="tt-scroll">
+          <div id="teacher-tt">
+            <p style="padding:20px;color:var(--muted);font-size:13px;">請先選擇教師</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 最右欄：按需開啟的第三課表 -->
+      <div class="tt-card third-timetable-card" id="third-timetable-card" hidden>
+        <div class="third-view-switch" role="tablist" aria-label="第三課表類型">
+          <button class="third-view-btn active" type="button" data-third-view="class">🏫 班級</button>
+          <button class="third-view-btn" type="button" data-third-view="teacher">👩‍🏫 教師</button>
+          <button class="third-view-btn" type="button" data-third-view="room">🏢 教室</button>
+          <button class="third-view-btn" type="button" data-third-view="patrol">🧭 巡堂</button>
+        </div>
+
+        <div class="third-view-control" id="third-class-controls">
+          <label for="third-class-select">班級</label>
+          <select id="third-class-select"><option value="">請選擇班級</option></select>
+          <span class="tt-card-title" id="third-class-label"></span>
+        </div>
+        <div class="third-view-control" id="third-teacher-controls" hidden>
+          <label for="third-teacher-select">教師</label>
+          <input id="third-teacher-select" type="text" placeholder="請選擇教師" style="width:180px;">
+          <span class="tt-card-title" id="third-teacher-label"></span>
+        </div>
+        <div class="third-view-control" id="third-patrol-controls" hidden>
+          <span class="tt-card-title">🧭 全校巡堂總覽</span>
+          <span class="text-muted" id="third-patrol-label">拖曳巡堂格可修改巡堂時段</span>
+        </div>
+        <div class="third-view-control" id="third-room-controls" hidden>
+          <label for="third-room-select">教室</label>
+          <select id="third-room-select"><option value="">請選擇教室</option></select>
+          <span class="tt-card-title" id="third-room-label"></span>
+        </div>
+
+        <div class="subject-palette third-pane-palette" id="third-class-palette-box">
+          <div class="palette-header">
+            <span>📦 班級待排科目</span>
+            <span class="text-muted" id="third-palette-class-info">請選擇班級</span>
+          </div>
+          <div class="palette-list" id="third-palette-list">
+            <span class="text-muted" style="font-size:12px;">選擇班級後顯示待排科目。</span>
+          </div>
+        </div>
+        <div class="subject-palette third-pane-palette" id="third-teacher-palette-box" hidden>
+          <div class="palette-header">
+            <span>📦 教師授課科目</span>
+            <span class="text-muted" id="third-palette-teacher-info">請選擇教師</span>
+          </div>
+          <div class="palette-list" id="third-teacher-palette-list">
+            <span class="text-muted" style="font-size:12px;">選擇教師後顯示授課班級。</span>
+          </div>
+        </div>
+
+        <div class="tt-scroll third-timetable-scroll">
+          <div id="third-class-tt">
+            <p style="padding:20px;color:var(--muted);font-size:13px;">請選擇班級</p>
+          </div>
+          <div id="third-teacher-tt" hidden>
+            <p style="padding:20px;color:var(--muted);font-size:13px;">請選擇教師</p>
+          </div>
+          <div id="third-room-tt" hidden>
+            <p style="padding:20px;color:var(--muted);font-size:13px;">請選擇教室</p>
+          </div>
+          <div id="third-patrol-tt" hidden>
+            <p style="padding:20px;color:var(--muted);font-size:13px;">點擊空白格選擇巡堂教師</p>
+          </div>
+        </div>
+        <div id="third-patrol-stats" class="third-patrol-stats" hidden></div>
+      </div>
+    </div>
+
+    <!-- 操作提示條 -->
+    <div id="tt-help" class="flex gap-4 items-center flex-wrap" style="margin-top:10px;padding:8px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--ink-2);">
+      <span>🖱️ <b>左鍵點空格</b>：指派課程</span>
+      <span>✋ <b>拖曳有課格</b>：移動課程</span>
+      <span>🔄 <b>Shift+拖曳</b>：互調兩格</span>
+      <span>🖱️ <b>右鍵</b>：更多選項</span>
+      <span>🧭 <b>教師空堂右鍵</b>：新增巡堂</span>
+       <span>◌ <b>淡色</b>：下學期預排，不列入鐘點</span>
+    </div>
+  </div>
+
+  <!-- ── Tab 5：教室課表 ── -->
+  <div class="tab-panel" id="panel-room">
+    <div class="panel-card" style="max-width:1100px;margin:auto;">
+      <div class="flex items-center gap-3 mb-3">
+        <label for="sel-room" style="font-weight:600;">🏫 教室：</label>
+        <select id="sel-room" style="width:200px;"><option value="">請選擇教室</option></select>
+        <span class="text-muted" style="font-size:12px;">教室課表依科目設定中的「所屬教室代碼」自動組織</span>
+        <span style="margin-left:auto;font-size:12px;color:#ef4444;"><b>⚠ 紅底</b> = 教室衝堂</span>
+      </div>
+      <div id="room-tt"><p style="color:var(--text-muted);padding:16px;">請選擇教室</p></div>
+    </div>
+  </div>
+
+  <!-- ── Tab 6：日期節次對調 ── -->
+  <div class="tab-panel" id="panel-exceptions">
+    <div class="exception-page">
+      <div class="panel-card exception-hero">
+        <div>
+          <div class="exception-kicker">校務調整</div>
+          <div class="panel-title" style="margin-bottom:4px;">📅 全校時段對調</div>
+          <p class="text-muted">固定週課表維持不變，只在指定日期套用兩個反向時段映射。適用學期：<strong id="exception-semester">未設定</strong>。</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="exportScheduleExceptions()">📤 匯出例外映射</button>
+      </div>
+
+      <div class="panel-card exception-editor" id="exception-editor">
+        <div class="panel-title">建立一次性對調事件</div>
+        <input id="exception-id" type="hidden">
+        <div class="form-row">
+          <div class="form-group" style="min-width:220px;">
+            <label for="exception-name">事件名稱</label>
+            <input id="exception-name" type="text" value="全校時段對調">
+          </div>
+          <div class="form-group" style="min-width:180px;">
+            <label>適用範圍</label>
+            <div class="exception-scope-readonly">全校</div>
+          </div>
+          <div class="form-group" style="min-width:220px;">
+            <label for="exception-remark">備註（選填）</label>
+            <input id="exception-remark" type="text">
+          </div>
+          <label class="exception-enabled-control" for="exception-enabled">
+            <input id="exception-enabled" type="checkbox" checked>
+            儲存後立即啟用
+          </label>
+        </div>
+
+        <div class="exception-endpoint-grid">
+          <section class="exception-endpoint-card">
+            <div class="exception-endpoint-title">端點 A</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="exception-date-a">實際日期</label>
+                <input id="exception-date-a" type="date" onchange="renderScheduleExceptionPreview()">
+              </div>
+              <div class="form-group">
+                <label for="exception-period-a">節次</label>
+                <select id="exception-period-a" onchange="renderScheduleExceptionPreview()">
+                  <option value="0">早自習</option><option value="1" selected>第 1 節</option><option value="2">第 2 節</option><option value="3">第 3 節</option><option value="4">第 4 節</option>
+                  <option value="5">第 5 節</option><option value="6">第 6 節</option><option value="7">第 7 節</option><option value="8">第 8 節</option>
+                  <option value="45">午休</option>
+                </select>
+              </div>
+            </div>
+          </section>
+          <div class="exception-swap-mark" aria-hidden="true">↔</div>
+          <section class="exception-endpoint-card">
+            <div class="exception-endpoint-title">端點 B</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="exception-date-b">實際日期</label>
+                <input id="exception-date-b" type="date" onchange="renderScheduleExceptionPreview()">
+              </div>
+              <div class="form-group">
+                <label for="exception-period-b">節次</label>
+                <select id="exception-period-b" onchange="renderScheduleExceptionPreview()">
+                  <option value="0">早自習</option><option value="1">第 1 節</option><option value="2">第 2 節</option><option value="3">第 3 節</option><option value="4">第 4 節</option>
+                  <option value="5" selected>第 5 節</option><option value="6">第 6 節</option><option value="7">第 7 節</option><option value="8">第 8 節</option>
+                  <option value="45">午休</option>
+                </select>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="exception-preview-heading">影響預覽</div>
+        <div id="exception-preview" class="exception-preview-grid">
+          <div class="exception-preview-empty">填妥兩個日期與節次後，這裡會顯示兩筆反向映射及影響範圍。</div>
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button id="exception-save-btn" class="btn btn-primary" type="button" onclick="saveScheduleException()">➕ 建立對調事件</button>
+          <button class="btn btn-ghost" type="button" onclick="clearScheduleExceptionForm()">清除</button>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <div class="panel-title">已建立的日期例外</div>
+        <div class="exception-table-scroll">
+          <table class="data-table" id="exception-table">
+            <thead><tr><th>事件</th><th>反向映射</th><th>狀態</th><th>備註</th><th>操作</th></tr></thead>
+            <tbody id="exception-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Tab 1：配課 ── -->
+  <div class="tab-panel" id="panel-config">
+    <!-- 配課子頁籤列 -->
+    <div class="sub-tab-bar">
+      <button class="sub-tab-btn active" onclick="switchSubTab('config', 'cls', this)">🏫 班級設定</button>
+      <button class="sub-tab-btn" onclick="switchSubTab('config', 'tea', this)">👩‍🏫 教師設定</button>
+      <button class="sub-tab-btn" onclick="switchSubTab('config', 'sub', this)">📚 科目設定</button>
+      <button class="sub-tab-btn" onclick="switchSubTab('config', 'asgn', this)">🔗 配課設定</button>
+      <button class="sub-tab-btn" onclick="switchSubTab('config', 'bind', this)">👥 綁班群組</button>
+      <button class="sub-tab-btn" onclick="switchSubTab('config', 'color', this)">🎨 課表配色</button>
+    </div>
+
+    <!-- 1. 班級設定 -->
+    <div class="sub-panel" id="subpanel-config-cls">
+      <div class="panel-card">
+        <div class="panel-title">🏫 班級設定</div>
+        <div class="form-row">
+          <div class="form-group"><label>班級代碼</label><input id="cls-code" type="text" placeholder="例：701"></div>
+          <div class="form-group"><label>年級</label><input id="cls-grade" type="text" placeholder="例：7"></div>
+          <div class="form-group"><label>班級名稱</label><input id="cls-name" type="text" placeholder="例：七年一班"></div>
+          <div class="form-group"><label>雙語課堂數</label><input id="cls-bilingual" type="number" min="0" step="1" placeholder="例：2"></div>
+          <div class="form-group" style="flex:0 0 auto;justify-content:flex-end;">
+            <label for="cls-virtual" style="display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:0;">
+              <input id="cls-virtual" type="checkbox" style="width:15px;height:15px;margin:0;accent-color:var(--primary);">虛擬班
+            </label>
+          </div>
+        </div>
+        <div class="flex gap-2 mb-3">
+          <button id="cls-save-btn" class="btn btn-primary btn-sm" onclick="saveClass()">➕ 新增</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearClassForm()">清除</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="data-table" id="class-table">
+            <thead><tr><th>代碼</th><th>年級</th><th>名稱</th><th>雙語課堂數</th><th>類型</th><th>導師</th><th></th></tr></thead>
+            <tbody id="class-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. 教師設定 -->
+    <div class="sub-panel" id="subpanel-config-tea" style="display:none;">
+      <div class="panel-card">
+        <div class="panel-title">👩‍🏫 教師設定</div>
+        <div class="form-row">
+          <input id="tea-code" type="hidden">
+          <div class="form-group" style="flex:1.5;"><label>教師姓名</label><input id="tea-name" type="text" placeholder="例：王大明"></div>
+          <div class="form-group"><label>Email（選填，調代課用）</label><input id="tea-email" type="text" placeholder="例：wang@school.tp.edu.tw"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>職稱（選填）</label><input id="tea-title" type="text" list="title-suggestions" placeholder="例：701導師、教務主任、教學組長" style="width:100%;"><datalist id="title-suggestions"><option value="701導師"><option value="702導師"><option value="703導師"><option value="校長"><option value="教務主任"><option value="教學組長"><option value="學務主任"><option value="生教組長"><option value="輔導主任"><option value="總務主任"><option value="專任教師"></datalist></div>
+
+          <div class="form-group"><label>基本鐘點（每週）</label><input id="tea-hours" type="number" placeholder="16" value="16"></div>
+          <div class="form-group"><label>每日最大連堂數</label><input id="tea-max-consec" type="number" placeholder="3" value="3"></div>
+        </div>
+        <div class="form-group mb-3"><label>減授原因（選填）</label><input id="tea-release-reason" type="text" placeholder="例：行政職務、導師減授、兼任組長"></div>
+        <div class="form-group mb-3">
+          <label class="text-sm font-bold mb-1 block">任教科目（可複選）：</label>
+          <div id="tea-subject-multiselect" class="custom-multiselect">
+            <div id="tea-subject-trigger" class="multiselect-trigger" onclick="toggleTeaSubjectDropdown(event)">
+              <div id="tea-subject-summary" class="multiselect-summary">
+                <span class="placeholder">請點擊選擇任教科目...</span>
+              </div>
+              <span class="arrow text-xs text-muted">▼</span>
+            </div>
+            <div id="tea-subject-dropdown" class="multiselect-dropdown" style="display:none;" onclick="event.stopPropagation()">
+              <div class="multiselect-header">
+                <input type="text" id="tea-subject-search" class="multiselect-search" placeholder="🔍 搜尋科目..." oninput="filterTeaSubjects(this.value)">
+                <div class="multiselect-actions">
+                  <button type="button" class="btn btn-ghost btn-xs" onclick="selectAllTeaSubjects(true)">全選</button>
+                  <button type="button" class="btn btn-ghost btn-xs" onclick="selectAllTeaSubjects(false)">全清</button>
+                </div>
+              </div>
+              <div id="tea-subject-boxes" class="multiselect-options"></div>
+            </div>
+          </div>
+        </div>
+        <div class="flex gap-2 mb-3">
+          <button id="tea-save-btn" class="btn btn-primary btn-sm" onclick="saveTeacher()">➕ 新增</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearTeacherForm()">清除</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="data-table" id="teacher-table">
+            <thead><tr><th>姓名</th><th>Email</th><th>職稱</th><th>基本鐘點</th><th>減授原因</th><th>任教科目</th><th></th></tr></thead>
+            <tbody id="teacher-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. 科目設定 -->
+    <div class="sub-panel" id="subpanel-config-sub" style="display:none;">
+      <div class="panel-card">
+        <div class="panel-title">📚 科目設定</div>
+        <div class="form-row">
+          <div class="form-group"><label>科目代碼/名稱</label><input id="sub-code" type="text" placeholder="例：國文"></div>
+          <div class="form-group"><label>預設每週節數</label><input id="sub-weekly" type="number" placeholder="1" value="1"></div>
+          <div class="form-group"><label>同時最多班數（選填）</label><input id="sub-max" type="number" placeholder="0" value="0"></div>
+          <div class="form-group"><label>最多連日（選填）</label><input id="sub-maxdays" type="number" placeholder="" value=""></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>適用年級（選填）</label><input id="sub-grade" type="text" placeholder="例：7,8,9 或 全校"></div>
+          <div class="form-group"><label>適用班級（選填，限定特定班）</label><input id="sub-classes" type="text" placeholder="例：701,702"></div>
+          <div class="form-group"><label>專科教室（選填）</label><select id="sub-room"><option value="">無</option></select></div>
+        </div>
+        <div class="flex gap-2 mb-3">
+          <button id="sub-save-btn" class="btn btn-primary btn-sm" onclick="saveSubject()">➕ 新增</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearSubjectForm()">清除</button>
+        </div>
+        <div style="overflow-x:hidden;">
+          <table class="data-table" id="subject-table" style="table-layout:fixed;width:100%;">
+            <colgroup>
+              <col style="width:80px">
+              <col style="width:70px">
+              <col style="width:60px">
+              <col style="width:50px">
+              <col style="width:80px">
+              <col style="width:80px">
+              <col style="width:120px">
+              <col style="width:120px">
+            </colgroup>
+            <thead><tr><th>代碼</th><th>每週節數</th><th>最多班</th><th>連日</th><th>適用年級</th><th>適用班級</th><th>專科教室</th><th></th></tr></thead>
+            <tbody id="subject-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. 配課設定 -->
+    <div class="sub-panel" id="subpanel-config-asgn" style="display:none;">
+      <div class="panel-card">
+        <div class="flex justify-between items-center mb-3">
+          <div class="flex items-center gap-2 flex-wrap">
+            <div class="panel-title" style="margin-bottom:0;">🔗 配課設定</div>
+            <div class="sub-tab-bar" style="margin:0;">
+              <button class="sub-tab-btn active" id="asgn-tab-btn-cls" onclick="switchAsgnSubTab('cls')">🏫 班級配課</button>
+              <button class="sub-tab-btn" id="asgn-tab-btn-tea" onclick="switchAsgnSubTab('tea')">👩‍🏫 教師配課</button>
+              <button class="sub-tab-btn" id="asgn-tab-btn-batch" onclick="switchAsgnSubTab('batch')">📌 批次配課</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4-A. 班級配課總覽 (Class View) -->
+        <div id="asgn-subpanel-cls" class="asgn-view-panel">
+          <div class="assignment-matrix-toolbar">
+            <div class="assignment-matrix-heading">
+              <div class="assignment-matrix-kicker">配課總覽</div>
+              <div class="assignment-matrix-title">班級與科目矩陣</div>
+              <div class="assignment-matrix-description">科目各自一欄，每列一個班級；點擊儲存格即可新增或修改配課。</div>
+            </div>
+            <div class="assignment-matrix-controls">
+            <div class="assignment-matrix-summary" id="asgn-matrix-summary">載入配課統計中…</div>
+              <label class="sr-only" for="asgn-class-filter">搜尋班級、教師或科目</label>
+              <input type="text" id="asgn-class-filter" class="multiselect-search assignment-matrix-filter" placeholder="🔍 搜尋班級／教師／科目…" oninput="renderClassAssignmentView()">
+            </div>
+          </div>
+          <div class="assignment-matrix-legend" aria-label="配課矩陣圖例">
+            <span class="assignment-matrix-legend-item"><i class="assignment-matrix-swatch is-assigned"></i>已配課</span>
+            <span class="assignment-matrix-legend-item"><i class="assignment-matrix-swatch is-empty"></i>可新增／修改</span>
+            <span class="assignment-matrix-legend-item"><i class="assignment-matrix-swatch is-not-applicable"></i>不適用，不可新增</span>
+            <span class="assignment-matrix-legend-hint">點擊儲存格開啟編輯視窗</span>
+          </div>
+          <div class="assignment-matrix-scroll">
+            <table class="data-table compact-table assignment-matrix-table" id="asgn-class-table">
+              <thead id="asgn-class-thead"></thead>
+              <tbody id="asgn-class-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 4-B. 教師配課總覽 (Teacher View) -->
+          <div id="asgn-subpanel-tea" class="asgn-view-panel" style="display:none;">
+            <div class="flex justify-between items-center mb-2 teacher-assignment-toolbar">
+            <div class="text-xs text-muted">檢視每位教師已配課清單與鐘點完成率</div>
+            <div class="flex gap-2 items-center teacher-assignment-actions">
+              <button class="btn btn-primary btn-sm teacher-assignment-overtime-btn" type="button" onclick="openAutomaticOvertimeForAll()">⏱️ 全部超鐘點</button>
+              <input type="text" id="asgn-teacher-filter" class="multiselect-search" placeholder="🔍 搜尋教師/科目..." style="width:160px;" oninput="renderTeacherAssignmentView()">
+            </div>
+          </div>
+          <div style="overflow-x:auto;">
+            <table class="data-table compact-table" id="asgn-teacher-table">
+              <thead>
+                <tr>
+                  <th style="width:120px;">教師代碼 / 姓名</th>
+                  <th style="width:90px;">基本鐘點</th>
+                  <th style="width:110px;">實際已排 / 剩餘節數</th>
+                  <th style="width:110px;">配課狀態</th>
+                  <th>已配課程與班級明細</th>
+                  <th style="width:90px;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="asgn-teacher-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 4-C. 批次配課控制台（頁籤） -->
+        <div id="asgn-subpanel-batch" class="asgn-view-panel" style="display:none;">
+          <div style="font-size:13px;color:var(--ink-2);margin-bottom:12px;">
+            一次為多個班級、多位教師或多個科目累加配課紀錄；既有資料會保留，備註也會追加，並可在預覽表中微調本次累加節數。
+          </div>
+          <div style="background:var(--surface-2);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:12px;">
+            <div class="form-row" style="margin-bottom:8px;">
+              <div class="form-group" style="margin-bottom:0;">
+                <label style="font-weight:bold;margin-bottom:4px;">選擇批次配課模式：</label>
+                <select id="batch-mode" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-weight:bold;background:var(--bg-card);" onchange="renderBatchPicker()">
+                  <option value="class-matrix" selected>🏫 按 班級/年級 配課（選班級 → 直覺填寫該班所有科目教師）</option>
+                  <option value="subject-matrix">📚 按 科目 配課（選科目 → 列出全校班級＋提供全年級一鍵指定）</option>
+                  <option value="teacher-to-classes">👩‍🏫 按 教師 配課（選教師 → 選擇科目並指派給多個班級）</option>
+                </select>
+              </div>
+            </div>
+            <div id="batch-picker" style="margin-top:8px;"></div>
+          </div>
+          <div style="background:var(--bg-card);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <div style="font-weight:bold;font-size:13px;display:flex;align-items:center;gap:8px;">
+                <span>📋 待累加／新增配課項目預覽與節數、備註微調</span>
+                <span class="text-muted" style="font-size:12px;font-weight:normal;" id="batch-count-info"></span>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button class="btn btn-ghost btn-xs" onclick="toggleBatchSelectAll(true)">☑️ 全選</button>
+                <button class="btn btn-ghost btn-xs" onclick="toggleBatchSelectAll(false)">◻️ 清除勾選</button>
+              </div>
+            </div>
+            <div id="batch-preview" style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;background:var(--bg-card);"></div>
+          </div>
+          <div class="flex justify-end gap-2" style="margin-top:16px;">
+            <button class="btn btn-primary" onclick="executeBatchAssign()" id="batch-submit-btn">➕ 建立配課紀錄</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. 綁班群組 -->
+    <div class="sub-panel" id="subpanel-config-bind" style="display:none;">
+      <div class="panel-card">
+        <div class="panel-title">👥 綁班群組設定
+          <span class="text-muted text-sm" style="margin-left:8px;">設定多班於同時間上不同或同科（如：社團/跨班選修）</span>
+        </div>
+        <div class="form-group bind-name-field">
+          <label for="bind-name">群組名稱</label>
+          <input id="bind-name" type="text" placeholder="例：七年級彈性課程 A 群">
+        </div>
+        <div class="bind-selection-grid">
+          <section class="bind-picker-panel">
+            <div class="bind-picker-head"><div><span class="bind-step">1</span> 選擇科目</div><div><button class="btn btn-ghost btn-xs" onclick="toggleBindSelection('subjects',true)">全選</button> <button class="btn btn-ghost btn-xs" onclick="toggleBindSelection('subjects',false)">清除</button></div></div>
+            <div id="bind-subjects" class="bind-picker-list"></div>
+          </section>
+          <section class="bind-picker-panel">
+            <div class="bind-picker-head"><div><span class="bind-step">2</span> 選擇班級 <small>至少 2 班</small></div><div><button class="btn btn-ghost btn-xs" onclick="toggleBindSelection('classes',true)">全選</button> <button class="btn btn-ghost btn-xs" onclick="toggleBindSelection('classes',false)">清除</button></div></div>
+            <div id="bind-classes" class="bind-picker-list"></div>
+          </section>
+        </div>        <div class="flex gap-2 mb-3">
+          <button id="bind-save-btn" class="btn btn-primary btn-sm" onclick="saveBindGroup()">➕ 新增群組</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearBindForm()">清除</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="data-table" id="bind-table">
+            <thead><tr><th>群組名稱</th><th>科目</th><th>班級</th><th></th></tr></thead>
+            <tbody id="bind-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. 課表配色 -->
+     <div class="sub-panel" id="subpanel-config-color" style="display:none;">
+       <div class="panel-card">
+         <div class="panel-title">🎨 課表配色設定</div>
+        <div class="form-row color-rule-editor">
+          <div class="form-group" style="min-width:210px;">
+            <label>科目</label>
+            <div class="color-class-head">
+              <div class="color-class-head-actions">
+                <button type="button" class="btn btn-ghost btn-xs" onclick="toggleColorSubjectChecks(true)">全選</button>
+                <button type="button" class="btn btn-ghost btn-xs" onclick="toggleColorSubjectChecks(false)">清除</button>
+              </div>
+            </div>
+            <div id="color-subject-checks" class="color-class-checks"></div>
+            <span class="text-muted text-sm">不勾＝全部科目</span>
+          </div>
+          <div class="form-group" style="flex:2;min-width:280px;">
+            <label>班級</label>
+            <div class="color-class-head">
+              <div class="color-class-head-actions">
+                <button type="button" class="btn btn-ghost btn-xs" onclick="toggleColorClassChecks(true)">全選</button>
+                <button type="button" class="btn btn-ghost btn-xs" onclick="toggleColorClassChecks(false)">清除</button>
+              </div>
+            </div>
+            <div id="color-class-checks" class="color-class-checks"></div>
+            <span class="text-muted text-sm">不勾＝該科目全部班級；勾選則僅套用勾選班級（年級核可勾選整年級）</span>
+          </div>
+          <div class="color-rule-options" aria-label="配色規則條件">
+            <div class="form-group color-rule-day">
+              <label>星期</label>
+              <select id="color-day">
+                <option value="">全部星期</option>
+                <option value="1">星期一</option>
+                <option value="2">星期二</option>
+                <option value="3">星期三</option>
+                <option value="4">星期四</option>
+                <option value="5">星期五</option>
+              </select>
+            </div>
+            <div class="form-group color-rule-period">
+              <label>節次範圍</label>
+              <div class="color-period-range">
+                <select id="color-period-start" aria-label="起始節次">
+                  <option value="">全部節次</option>
+                  <option value="1">第 1 節</option><option value="2">第 2 節</option><option value="3">第 3 節</option><option value="4">第 4 節</option>
+                  <option value="5">第 5 節</option><option value="6">第 6 節</option><option value="7">第 7 節</option><option value="8">第 8 節</option>
+                </select>
+                <span>至</span>
+                <select id="color-period-end" aria-label="結束節次">
+                  <option value="">全部節次</option>
+                  <option value="1">第 1 節</option><option value="2">第 2 節</option><option value="3">第 3 節</option><option value="4">第 4 節</option>
+                  <option value="5">第 5 節</option><option value="6">第 6 節</option><option value="7">第 7 節</option><option value="8">第 8 節</option>
+                </select>
+              </div>
+              <span class="text-muted text-sm">留白＝不限節次</span>
+            </div>
+            <div class="form-group color-rule-color">
+              <label>底色</label>
+              <div class="color-picker-row">
+                <select id="color-preset-select" onchange="onColorPresetSelectChange(this)" style="flex:1;min-width:0;">
+                 <option value="DEEAF6" style="background-color:#DEEAF6;color:#374151;">淺藍</option>
+                 <option value="E2EFD9" style="background-color:#E2EFD9;color:#374151;">淺綠</option>
+                 <option value="FBE4D5" style="background-color:#FBE4D5;color:#374151;">淺橘</option>
+                 <option value="FFF2CC" style="background-color:#FFF2CC;color:#374151;">鵝黃</option>
+                 <option value="FFD5D5" style="background-color:#FFD5D5;color:#374151;">粉色</option>
+                 <option value="FFDDDD" style="background-color:#FFDDDD;color:#374151;">淡粉</option>
+                 <option value="CCCCFF" style="background-color:#CCCCFF;color:#374151;">淺紫</option>
+                 <option value="D9D9D9" style="background-color:#D9D9D9;color:#374151;">灰色</option>
+                 <option value="F2F2F2" style="background-color:#F2F2F2;color:#374151;">淺灰</option>
+                 <option value="D0CECE" style="background-color:#D0CECE;color:#374151;">深灰</option>
+                 <option value="__CUSTOM__" style="background-color:#FFFFFF;color:#374151;">🎨 自訂選色…</option>
+                </select>
+                <div class="color-custom-row" id="color-custom-row" style="display:none;">
+                  <input id="color-hex" type="color" value="#DEEAF6" oninput="syncColorHexText()">
+                  <input id="color-hex-text" type="text" value="DEEAF6" maxlength="7" style="width:74px;" onchange="syncColorHexManual(this)">
+                </div>
+              </div>
+            </div>
+            <div class="form-group color-rule-note">
+              <label>說明（選填）</label>
+              <input id="color-note" type="text" placeholder="例：英語綁班">
+            </div>
+          </div>
+        </div>
+        <div class="flex gap-2 mb-3">
+          <button id="color-save-btn" class="btn btn-primary btn-sm" onclick="saveColorRule()">➕ 新增規則</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearColorForm()">清除</button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="data-table" id="color-table">
+            <thead><tr><th>底色</th><th>科目</th><th>班級</th><th>時段</th><th>說明</th><th></th></tr></thead>
+            <tbody id="color-tbody"></tbody>
+          </table>
+        </div>
+         <p class="text-muted text-sm" style="margin-top:8px;">提示：科目留空代表「全部科目」；班級不勾代表「全部班級」；星期與節次留白代表不限時段。同格命中多筆規則時，依「班級＞科目＞時段」精確度取最高者。</p>
+      </div>
+    </div>
+  </div>
+  <div class="tab-panel" id="panel-constraints">
+    <!-- 限制子頁籤列 -->
+    <div class="sub-tab-bar">
+      <button class="sub-tab-btn active" onclick="switchSubTab('constraints', 'block', this)">⛔ 教師不排課</button>
+      <button class="sub-tab-btn" onclick="switchSubTab('constraints', 'rule', this)">📌 科目時段規則</button>
+      <button class="sub-tab-btn" onclick="switchSubTab('constraints', 'relation', this)">🧩 科目關係</button>
+      <button class="sub-tab-btn" onclick="switchSubTab('constraints', 'exclusive', this)">🔗 教師互斥規則</button>
+    </div>
+
+    <!-- 1. 教師不排課設定 -->
+    <div class="sub-panel" id="subpanel-constraints-block">
+      <div class="panel-card">
+        <div class="panel-title">⛔ 教師不排課設定
+          <span class="text-muted text-sm" style="margin-left:8px;">可批次選多位教師套用同一時段</span>
+        </div>
+        <!-- 教師選擇 -->
+        <div class="mb-3">
+          <div class="flex gap-2 mb-2 items-center flex-wrap" style="background:var(--bg-subtle, #f8fafc);padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);">
+            <span class="text-sm font-bold" style="white-space:nowrap;">⚡ 快速勾選：</span>
+            <button class="btn btn-ghost btn-xs" onclick="blockSelectGroup('homeroom')" title="勾選全校導師">🏫 勾選導師</button>
+            <button class="btn btn-ghost btn-xs" onclick="blockSelectGroup('admin')" title="勾選校長、主任、組長等行政人員">💼 勾選行政人員</button>
+            <span class="text-muted" style="margin:0 2px;">|</span>
+            <span class="text-sm font-bold" style="white-space:nowrap;">📚 依科目勾選：</span>
+            <select id="block-subject-select" style="font-size:12px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;" onchange="blockSelectSubject(this.value)">
+              <option value="">請選擇科目</option>
+            </select>
+            <span class="text-muted" style="margin:0 2px;">|</span>
+            <button class="btn btn-ghost btn-xs" onclick="blockSelectGroup('all')">全選</button>
+            <button class="btn btn-ghost btn-xs" onclick="blockSelectGroup('none')">清除勾選</button>
+          </div>
+          <div id="block-teachers" class="teacher-picker"></div>
+        </div>
+
+        <!-- Mini 課表選節次與目前設定 -->
+        <div class="constraint-workbench">
+          <section class="constraint-editor-panel">
+            <div class="constraint-slot-heading"><span class="text-sm font-bold">點選要設定的節次（可多選）：</span><span id="block-editing-notice" class="block-editing-notice" hidden></span></div>
+            <div id="block-slot-grid" class="slot-grid"></div>
+            <div class="form-group constraint-reason">
+              <label>原因標注（選填）</label>
+              <input id="block-reason" type="text" placeholder="例：週三下午進修">
+            </div>
+            <div class="flex gap-2 constraint-actions">
+              <button id="block-apply-btn" class="btn btn-danger btn-sm" onclick="applyBlock(false)">⛔ 設定不排課</button>
+              <button id="block-clear-btn" class="btn btn-ghost btn-sm" onclick="applyBlock(true)">✅ 清除不排課</button>
+            </div>
+          </section>
+          <aside class="constraint-current-card">
+            <div class="constraint-current-title">目前不排課設定</div>
+            <div class="constraint-list-scroll">
+              <table class="data-table" id="block-table">
+                <thead><tr><th>教師</th><th>不排課時段</th><th>原因</th><th>操作</th></tr></thead>
+                <tbody id="block-tbody"></tbody>
+              </table>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+    <!-- 2. 科目時段規則 -->
+    <div class="sub-panel" id="subpanel-constraints-rule" style="display:none;">
+      <div class="panel-card">
+        <div class="panel-title">📌 科目時段規則</div>
+        <div class="form-row" style="align-items:flex-start;">
+          <div class="form-group" style="min-width:220px;">
+            <label>科目（可複選）</label>
+            <div class="color-class-head">
+              <div class="color-class-head-actions">
+                <button type="button" class="btn btn-ghost btn-xs" onclick="toggleRuleChecks('subject',true)">全選</button>
+                <button type="button" class="btn btn-ghost btn-xs" onclick="toggleRuleChecks('subject',false)">清除</button>
+              </div>
+            </div>
+            <input id="rule-subject-search" class="multiselect-search" type="text" placeholder="🔍 搜尋科目..." oninput="filterRuleChecks('subject',this.value)">
+            <div id="rule-subject-checks" class="color-class-checks rule-scope-checks"></div>
+            <span class="text-muted text-sm">至少選一科，可套用同一組時段規則</span>
+          </div>
+          <div class="form-group" style="min-width:220px;">
+            <label>適用年級</label>
+            <select id="rule-grade">
+              <option value="全校" selected>全校（通用）</option>
+              <option value="7">7 年級</option>
+              <option value="8">8 年級</option>
+              <option value="9">9 年級</option>
+            </select>
+            <label style="margin-top:8px;">適用班級（可複選）</label>
+            <div class="color-class-head">
+              <div class="color-class-head-actions">
+                <button type="button" class="btn btn-ghost btn-xs" onclick="toggleRuleChecks('class',true)">全選</button>
+                <button type="button" class="btn btn-ghost btn-xs" onclick="toggleRuleChecks('class',false)">清除</button>
+              </div>
+            </div>
+            <input id="rule-class-search" class="multiselect-search" type="text" placeholder="🔍 搜尋班級..." oninput="filterRuleChecks('class',this.value)">
+            <div id="rule-class-checks" class="color-class-checks rule-scope-checks"></div>
+            <span class="text-muted text-sm">不勾＝依年級套用；勾選後只套用所選班級</span>
+          </div>
+          <div class="form-group" style="min-width:190px;">
+            <label>規則類型</label>
+            <select id="rule-type">
+              <option value="必排">必排（此時段必須安排）</option>
+              <option value="禁排">禁排（此時段不可安排）</option>
+            </select>
+          </div>
+        </div>
+        <div class="constraint-workbench">
+          <section class="constraint-editor-panel">
+            <div class="text-sm font-bold mb-2">點選要套用的時段：</div>
+            <div id="rule-slot-grid" class="slot-grid"></div>
+            <div id="rule-selection-summary" class="constraint-inline-summary">請選擇科目與時段</div>
+            <div class="flex gap-2 constraint-actions">
+              <button id="rule-apply-btn" class="btn btn-primary btn-sm" onclick="applySubjectRule(false)">📌 套用規則</button>
+              <button id="rule-clear-btn" class="btn btn-ghost btn-sm" onclick="applySubjectRule(true)">🗑 清除規則</button>
+            </div>
+          </section>
+          <aside class="constraint-current-card">
+            <div class="constraint-current-title">目前科目規則</div>
+            <div class="constraint-list-scroll">
+              <table class="data-table" id="rule-table">
+                <thead><tr><th>科目</th><th>適用年級</th><th>適用班級</th><th>類型</th><th>時段</th><th>操作</th></tr></thead>
+                <tbody id="rule-tbody"></tbody>
+              </table>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. 科目關係 -->
+    <div class="sub-panel" id="subpanel-constraints-relation" style="display:none;">
+      <div class="panel-card">
+        <div class="panel-title">🧩 科目關係
+          <span class="text-muted text-sm" style="margin-left:8px;">同一班指定兩科盡量不要排在同一天，無合法替代時仍可排入；若兩科同屬綁班群組，會標示為綁班共時</span>
+        </div>
+        <div class="form-row" style="align-items:flex-end;gap:12px;flex-wrap:wrap;">
+          <div class="form-group" style="min-width:160px;">
+            <label>科目 A</label>
+            <select id="relation-subject-a"></select>
+          </div>
+          <div style="padding-bottom:8px;font-size:18px;">↔</div>
+          <div class="form-group" style="min-width:160px;">
+            <label>科目 B</label>
+            <select id="relation-subject-b"></select>
+          </div>
+          <div class="form-group" style="min-width:130px;">
+            <label>適用年級</label>
+            <select id="relation-grade">
+              <option value="全校" selected>全校（通用）</option>
+              <option value="7">7 年級</option>
+              <option value="8">8 年級</option>
+              <option value="9">9 年級</option>
+            </select>
+          </div>
+          <div class="form-group" style="min-width:190px;">
+            <label>適用班級</label>
+            <input id="relation-class" type="text" aria-describedby="relation-class-help">
+            <span id="relation-class-help" class="text-muted text-xs">留空依年級套用，多班請用逗號分隔</span>
+          </div>
+          <div class="form-group" style="min-width:180px;">
+            <label>備註（選填）</label>
+            <input id="relation-remark" type="text">
+          </div>
+          <div>
+            <button id="relation-save-btn" class="btn btn-primary btn-sm" onclick="saveSubjectRelation()">➕ 新增科目關係</button>
+            <button id="relation-cancel-btn" class="btn btn-ghost btn-sm" onclick="cancelSubjectRelationEdit()" style="display:none;">取消編輯</button>
+          </div>
+        </div>
+        <div class="constraint-list-scroll" style="margin-top:12px;">
+          <table class="data-table" id="relation-table">
+            <thead><tr><th>科目 A</th><th>科目 B</th><th>適用年級</th><th>適用班級</th><th>備註</th><th>操作</th></tr></thead>
+            <tbody id="relation-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. 教師互斥規則 -->
+    <div class="sub-panel" id="subpanel-constraints-exclusive" style="display:none;">
+      <div class="panel-card">
+        <div class="panel-title">🔗 教師互斥規則
+          <span class="text-muted text-sm" style="margin-left:8px;">設定哪兩位教師不得排在同一節次（如：體育老師搶場地、夫妻錯開、行政輪值）</span>
+        </div>
+        <div class="form-row" style="align-items:flex-end;gap:12px;flex-wrap:wrap;">
+          <div class="form-group" style="min-width:160px;">
+            <label>教師 A</label>
+            <input id="exclusive-teacher-a" type="text" placeholder="搜尋教師代號或姓名" oninput="filterExclusiveTeacher('a',this.value)" autocomplete="off" style="min-width:140px;">
+            <div id="exclusive-dropdown-a" class="teacher-dropdown" style="display:none;"></div>
+          </div>
+          <div style="padding-top:20px;font-size:18px;">⛔</div>
+          <div class="form-group" style="min-width:160px;">
+            <label>教師 B</label>
+            <input id="exclusive-teacher-b" type="text" placeholder="搜尋教師代號或姓名" oninput="filterExclusiveTeacher('b',this.value)" autocomplete="off" style="min-width:140px;">
+            <div id="exclusive-dropdown-b" class="teacher-dropdown" style="display:none;"></div>
+          </div>
+          <div class="form-group" style="min-width:160px;">
+            <label>備註（選填）</label>
+            <input id="exclusive-remark" type="text" placeholder="例：共用操場/體育器材">
+          </div>
+          <div style="padding-top:20px;">
+            <button class="btn btn-primary btn-sm" onclick="addExclusiveRule()">➕ 新增互斥規則</button>
+          </div>
+        </div>
+        <input type="hidden" id="exclusive-val-a" value="">
+        <input type="hidden" id="exclusive-val-b" value="">
+        <div class="constraint-list-scroll" style="margin-top:12px;">
+          <table class="data-table" id="exclusive-table">
+            <thead><tr><th>教師 A</th><th>教師 B</th><th>備註</th><th>操作</th></tr></thead>
+            <tbody id="exclusive-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- ── Tab 3：統計與匯出 ── -->
+  <div class="tab-panel" id="panel-stats">
+    <div class="stats-grid" id="stats-summary"></div>
+    <div class="section-row">
+      <div class="panel-card">
+        <div class="panel-title">👩‍🏫 教師排課統計</div>
+        <div style="overflow-x:auto;">
+          <table class="data-table" id="stats-teacher-table">
+            <thead><tr><th>教師</th><th>已排節數</th><th>已配節數</th><th>待排節數</th><th>進度</th></tr></thead>
+            <tbody id="stats-teacher-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel-card">
+        <div class="panel-title">🏫 班級排課統計</div>
+        <div style="overflow-x:auto;">
+          <table class="data-table" id="stats-class-table">
+            <thead><tr><th>班級</th><th>已排節數</th><th>空格數</th></tr></thead>
+            <tbody id="stats-class-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="panel-card">
+      <div class="panel-title">📤 匯出至調代課系統</div>
+       <p class="text-muted mb-3">匯出格式與調代課系統欄位完全相容（學期代號／教師Email／星期數字／課堂屬性／特殊標記）。特殊課程會保留併班、綁課、抽離、超鐘點、預排等識別。<br>建議順序：先匯出<b>教師名單</b>，至調代課系統先「匯入教師」，再匯出並匯入<b>課表</b>。</p>
+      <div class="d-flex" style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="doExportTeachers()">📥 匯出教師名單至試算表</button>
+        <button class="btn btn-primary" onclick="doExport()">📤 匯出課表至試算表</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<!-- ===== 設定 Modal（GAS URL）===== -->
+<div class="modal-overlay" id="__settingsModal">
+  <div class="modal-card">
+    <div class="modal-title">⚙️ 連線設定</div>
+    <div class="form-group mb-3">
+      <label for="__gasInput">GAS Web App 網址</label>
+      <input type="password" id="__gasInput" placeholder="https://script.google.com/macros/s/.../exec">
+    </div>
+    <div id="__shareBlock">
+      <button class="btn btn-ghost btn-sm mb-3" onclick="genShareLink()">🔗 產生分享連結</button>
+      <div id="__shareResult" style="display:none;">
+        <div class="text-muted text-sm mb-2" id="__shareUrl"></div>
+        <div style="text-align:center;"><img id="__qrImg" alt="QR Code" style="max-width:180px;border-radius:8px;"></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="__clearBtn">清除設定</button>
+      <button class="btn btn-primary" id="__saveBtn">儲存並連線</button>
+    </div>
+  </div>
+</div>
+
+<!-- 🤖 自動排課 Modal -->
+<div class="modal-overlay" id="__autoModal">
+  <div class="modal-card" style="max-width:540px;">
+    <div class="modal-title">🤖 智慧自動排課引擎</div>
+    <div style="font-size:13px;color:var(--ink-2);margin-bottom:12px;">
+      系統將維持您已手動安排、預排及鎖定的課程，將全校剩餘「未排入」的課程依照各項規則自動計算並安排入最佳時段。
+    </div>
+    <div style="background:var(--surface-2);padding:12px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:14px;">
+      <div style="background:var(--bg-card);padding:8px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:12px;display:flex;align-items:center;flex-wrap:wrap;gap:8px;">
+        <div style="font-weight:bold;font-size:13px;">🕒 自動排課節次範圍：</div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:13px;">
+          <select id="auto-period-start" style="padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;">
+            <option value="1" selected>第 1 節</option>
+            <option value="2">第 2 節</option>
+            <option value="3">第 3 節</option>
+            <option value="4">第 4 節</option>
+          </select>
+          <span>至</span>
+          <select id="auto-period-end" style="padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;font-weight:bold;color:var(--accent);">
+            <option value="7" selected>第 7 節（正式課程 1~7 節）</option>
+            <option value="8">第 8 節（含第8節課後輔導）</option>
+            <option value="4">第 4 節（半日課模式 1~4 節）</option>
+          </select>
+        </div>
+      </div>
+      <div style="font-weight:bold;margin-bottom:8px;font-size:13px;">⚙️ 排課規則設定：</div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:6px;color:var(--ink-2);">
+        <span>📅 同一班級、同一科目每天最多 1 節；明確必排連堂依指定節次例外</span>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:6px;cursor:pointer;">
+        <input type="checkbox" id="auto-opt-morning-core" checked> 核心學科溫和優先上午（保留下午排課空間）
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:6px;cursor:pointer;">
+        <input type="checkbox" id="auto-opt-teacher-consec" checked> 嚴格遵守教師最大每日連堂節數限制
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:6px;cursor:pointer;">
+        <input type="checkbox" id="auto-opt-smart-swap" checked> 啟用智慧多重連鎖交換（解決極端衝堂，提高 99%+ 完排率）
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+        <input type="checkbox" id="auto-opt-randomize" checked> 🎲 探索候選平手與接近分數時的不同結果
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:6px;cursor:pointer;color:var(--accent);font-weight:bold;">
+        <input type="checkbox" id="auto-opt-multi-restart"> 多方案探索：基準解加 2 次候選，保留最佳合法課表（運算時間較長）
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:6px;cursor:pointer;">
+        <span style="white-space:nowrap;">亂數種子：</span>
+        <input id="auto-random-seed" type="number" inputmode="numeric" placeholder="留白自動產生" style="width:132px;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;">
+        <span style="color:var(--ink-2);">填入相同數字可重現結果</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:6px;cursor:pointer;">
+        <span style="white-space:nowrap;">優先教師：</span>
+        <input id="auto-priority-teachers" type="text" placeholder="教師代碼或姓名，逗號分隔" style="flex:1;min-width:190px;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;">
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:6px;cursor:pointer;">
+        <span style="white-space:nowrap;">優先科目：</span>
+        <input id="auto-priority-subjects" type="text" placeholder="科目代碼，逗號分隔" style="flex:1;min-width:190px;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;">
+      </label>
+      <div style="font-size:12px;color:var(--ink-2);margin-top:6px;">系統會先偵測限制緊迫度；以上欄位只改變排序，不會放寬衝堂、禁排或綁班限制。</div>
+      <hr style="margin:10px 0;border:none;border-top:1px solid var(--border);">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;color:var(--accent);font-weight:bold;">
+        <input type="checkbox" id="auto-opt-p8-only"> 🔢 第八節專用模式（範圍鎖定第 8 節，僅排結尾為「輔」的科目）
+      </label>
+    </div>
+
+    <div style="background:var(--surface-2);padding:12px;border-radius:var(--radius-sm);border:2px solid var(--accent);margin-bottom:14px;">
+      <div style="font-weight:bold;margin-bottom:10px;font-size:13px;color:var(--accent);">🪢 分階段排課模式：</div>
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;margin-bottom:8px;cursor:pointer;">
+        <input type="radio" name="auto-mode" id="auto-mode-all" value="all" checked style="margin-top:2px;">
+        <span><b>全量自動</b>：一次排完所有未排課（含必排、綁班、一般課程）</span>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;margin-bottom:8px;cursor:pointer;">
+        <input type="radio" name="auto-mode" id="auto-mode-phase1" value="phase1" style="margin-top:2px;">
+        <span><b>第一階段：必排 + 綁班優先</b>。只排有「必排規則」的科目和「綁班群組」課程，完成後暫停供您手動微調</span>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;cursor:pointer;">
+        <input type="radio" name="auto-mode" id="auto-mode-phase2" value="phase2" style="margin-top:2px;">
+        <span><b>第二階段：補排一般課程</b>。略過已排的必排／綁班，只補排剩餘一般課程（手調完再跑此階段）</span>
+      </label>
+    </div>
+
+    <div class="flex justify-end gap-2">
+      <button class="btn btn-ghost" onclick="closeAutoScheduleModal()">取消</button>
+      <button class="btn btn-primary" onclick="executeAutoSchedule()">🚀 開始自動排課</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 通用 Modal ===== -->
+<div class="modal-overlay" id="__modal">
+  <div class="modal-card">
+    <div class="modal-title" id="__modalTitle"></div>
+    <div class="modal-msg" id="__modalMsg"></div>
+    <div class="modal-actions" id="__modalActions"></div>
+  </div>
+</div>
+
+<!-- ===== 指派課程 Modal ===== -->
+<div class="modal-overlay" id="assignModal">
+  <div class="modal-card">
+    <div class="modal-title" id="assignModalTitle">📝 指派課程</div>
+    <div id="assignModalBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeAssignModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmAssign()">確認指派</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 班級配課矩陣編輯 Modal ===== -->
+<div class="modal-overlay" id="matrixAssignmentModal">
+  <div class="modal-card matrix-assignment-modal-card">
+    <div class="modal-title" id="matrixAssignmentTitle">新增配課</div>
+    <div class="matrix-assignment-context" id="matrixAssignmentContext"></div>
+    <div class="form-group mb-3">
+      <label>授課教師</label>
+      <div id="matrixAssignmentTeacherList"></div>
+       <button type="button" class="btn btn-ghost btn-xs" onclick="addMatrixAssignmentTeacher()" style="margin-top:6px;">＋新增協同教師</button>
+       <div class="text-muted text-xs" style="margin-top:5px;">第一位為主教師，其餘教師會與主教師同時排入；自動排課會一併檢查所有教師的不排課與衝堂。填寫 0.5 節代表第八節單／雙週對開。</div>
+    </div>
+    <div class="form-row matrix-assignment-fields">
+      <div class="form-group">
+        <label for="matrixAssignmentWeekly">每週節數（留白使用科目預設）</label>
+         <input id="matrixAssignmentWeekly" type="number" min="0.5" max="20" step="0.5" placeholder="科目預設">
+      </div>
+      <div class="form-group">
+        <label for="matrixAssignmentAttribute">課程屬性</label>
+        <select id="matrixAssignmentAttribute">
+          <option value="">一般課程</option>
+          <option value="預排">預排（下學期）</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group mb-3">
+      <label for="matrixAssignmentNote">備註</label>
+      <input id="matrixAssignmentNote" type="text" placeholder="選填">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeMatrixAssignmentEditor()">取消</button>
+      <button class="btn btn-primary" onclick="saveMatrixAssignment()">儲存配課</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 自動超鐘點預覽 Modal ===== -->
+<div class="modal-overlay" id="autoOvertimeModal">
+  <div class="modal-card" style="max-width:900px;width:calc(100vw - 32px);">
+    <div class="modal-title" id="auto-overtime-title">⏱️ 自動設定超鐘點</div>
+    <div id="auto-overtime-summary" style="font-size:13px;color:var(--ink-2);margin-bottom:10px;"></div>
+    <div id="auto-overtime-body" style="max-height:56vh;overflow:auto;border:1px solid var(--border);border-radius:8px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeAutomaticOvertimeModal()">取消</button>
+      <button class="btn btn-primary" id="auto-overtime-apply-btn" onclick="applyAutomaticOvertimePlan()">確認套用</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 右鍵選單 ===== -->
+<div id="ctx-menu">
+  <div class="ctx-item" id="ctx-assign">📝 指派課程</div>
+  <div class="ctx-item" id="ctx-edit">✏️ 修改課程</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-lock">🔒 鎖定此格</div>
+  <div class="ctx-item" id="ctx-unlock">🔓 解鎖此格</div>
+  <div class="ctx-item" id="ctx-overtime">⏱️ 設為超鐘點</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item danger" id="ctx-clear">🗑 清除此格</div>
+</div>
+
+<!-- ===== 載入遮罩 ===== -->
+<div id="loading">
+  <div class="spinner"></div>
+  <p id="loading-msg">載入中…</p>
+  <p id="loading-timer"></p>
+</div>
+
+<!-- ===== Toast 容器 ===== -->
+<div id="toast-wrap"></div>
+
+<!-- ===== Word 匯出 Modal ===== -->
+<div class="modal-overlay" id="wordExportModal">
+  <div class="modal-card" style="max-width:580px;">
+    <div class="modal-title">📄 匯出 Word 官方課表</div>
+    
+    <div style="display:flex;gap:8px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:8px;">
+      <button class="btn btn-sm btn-primary" id="word-tab-class" onclick="switchWordTab('class')" style="font-weight:bold;">🏫 班級課表</button>
+      <button class="btn btn-sm btn-ghost" id="word-tab-teacher" onclick="switchWordTab('teacher')" style="font-weight:bold;">👨‍🏫 教師課表</button>
+      <button class="btn btn-sm btn-ghost" id="word-tab-room" onclick="switchWordTab('room')" style="font-weight:bold;">🏫 教室課表</button>
+      <button class="btn btn-sm btn-ghost" id="word-tab-patrol" onclick="switchWordTab('patrol')" style="font-weight:bold;">🧭 巡堂表</button>
+    </div>
+
+    <div id="word-desc" style="font-size:13px;color:var(--ink-2);margin-bottom:12px;">
+      勾選要匯出的班級，套用官方 Word 範本產出一份 .docx（每班一頁）。
+      <br>第八節支援單雙週拆欄，範本可使用 <code>{d1p8s}</code><code>{d1p8d}</code> 佔位符分別標示（單）（雙）。
+    </div>
+
+    <div id="word-select-controls" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border);">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;font-weight:bold;">
+        <input type="checkbox" id="word-select-all" onchange="toggleWordSelectAll(this.checked)"> 全選／全不選
+      </label>
+      <span class="text-muted" style="font-size:12px;" id="word-selected-count">已選 0 項目</span>
+    </div>
+
+    <div id="word-class-panel">
+      <div id="word-class-list" style="max-height:280px;overflow-y:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:4px 0;"></div>
+    </div>
+
+    <div id="word-teacher-panel" style="display:none;">
+      <div id="word-teacher-list" style="max-height:280px;overflow-y:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:4px 0;"></div>
+    </div>
+
+    <div id="word-room-panel" style="display:none;">
+      <div id="word-room-list" style="max-height:280px;overflow-y:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:4px 0;"></div>
+    </div>
+
+    <div id="word-patrol-panel" style="display:none;">
+      <div id="word-patrol-summary" class="text-muted" style="font-size:13px;padding:6px 0 10px;"></div>
+      <div id="word-patrol-list" style="max-height:280px;overflow-y:auto;padding:4px 0;"></div>
+    </div>
+
+    <div id="word-export-progress" style="display:none;margin-top:14px;">
+      <div style="font-size:13px;color:var(--ink-2);margin-bottom:6px;" id="word-export-msg">準備中…</div>
+      <div style="background:var(--border);border-radius:4px;height:8px;overflow:hidden;">
+        <div id="word-export-bar" style="height:100%;background:#7c3aed;width:0%;transition:width 0.3s;"></div>
+      </div>
+    </div>
+    
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn btn-ghost" onclick="closeWordExportModal()">取消</button>
+      <button class="btn btn-primary" onclick="startWordExport()" id="word-export-btn" style="background:#7c3aed;">📥 開始匯出</button>
+    </div>
+  </div>
+</div>
+
+<script src="pizzip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.4/dist/pizzip.min.js"></script>
+<script src="https://unpkg.com/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+   <script src="word-export.js?v=20260825_v1211_class_subject_phrase_breaks"></script>
+   <script src="app.js?v=20260824_v1208_schedule_exceptions"></script>
+   <script src="app-runtime.js?v=20260824_v1208_schedule_exceptions"></script>
+</body>
+</html>

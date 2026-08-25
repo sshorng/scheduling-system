@@ -1,0 +1,29 @@
+# 本機快取與測試紀錄
+__pycache__/
+.playwright-mcp/
+*.pyc
+*.log
+
+# 編輯器與系統暫存檔
+.DS_Store
+Thumbs.db
+*.swp
+*~
+*.tmp
+
+# 備份模板，不屬於正式匯出來源
+*.bak
+*.bak.*
+
+# 一次性程式碼修補腳本，不是執行時程式
+fix.py
+patch.py
+patch2.py
+patch3.py
+patch_dfs.py
+
+# 機密設定檔
+.env
+.env.*
+*.pem
+*.key

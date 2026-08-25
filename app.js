@@ -3832,14 +3832,16 @@ function renderTeacherTT(teacherCode, target = 'primary') {
   const formalHoursFn = typeof countTeacherFormalScheduleHours === 'function'
     ? countTeacherFormalScheduleHours
     : (typeof window !== 'undefined' ? window.countTeacherFormalScheduleHours : null);
-  const teacherTotalScheduled = typeof formalHoursFn === 'function'
+  const teacherFormalScheduled = typeof formalHoursFn === 'function'
     ? formalHoursFn(teacherCode)
     : idx.scheduledAssignedByTeacher?.[String(teacherCode)] || 0;
+  // 完成度要包含第八節；正式鐘點則沿用排除第八節的規則。
+  const teacherTotalScheduled = idx.scheduledAssignedByTeacher?.[String(teacherCode)] ?? teacherFormalScheduled;
   const teacherTotalRemaining = Math.max(0, teacherTotalWeekly - teacherTotalScheduled);
   const tName = t ? ((t['教師姓名'] || t['姓名']) || teacherCode) : teacherCode;
   const basicHoursRaw = parseWeeklyValue(t?.['基本鐘點'], NaN);
   const basicHours = Number.isFinite(basicHoursRaw) ? basicHoursRaw : 0;
-  const overtimeHours = Math.max(0, teacherTotalScheduled - basicHours);
+  const overtimeHours = Math.max(0, teacherFormalScheduled - basicHours);
   const hoursLabel = '基本鐘點 ' + (Number.isFinite(basicHoursRaw) ? formatWeeklyValue(basicHours) : '未設定') +
     ' 節／超鐘點 ' + formatWeeklyValue(overtimeHours) + ' 節';
   const tLabelEl = document.getElementById(pane.teacherLabel);

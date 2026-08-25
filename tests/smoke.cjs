@@ -223,9 +223,11 @@ check('Teacher assignment status uses formal hours and preserves zero basic hour
   if (context.parseTeacherBasicHours({ '基本鐘點': '0' }) !== 0) throw new Error('基本鐘點 0 被套用預設值');
   if (context.parseTeacherBasicHours({ '基本鐘點': '' }) !== 0) throw new Error('空白基本鐘點未降為 0');
    if (context.countTeacherFormalScheduleHours('T01') !== 4) throw new Error('教師配課狀態未只排除第八節並保留早自習與午休');
-  if (!runtime.includes('slots.add(key.slice(code.length + 1))')) throw new Error('教師配課節數未依教師星期節次去重');
-  if (!runtime.includes('const overtime = scheduledHours - basicHours')) throw new Error('教師配課狀態未依實際節數計算超鐘點');
-  if (runtime.includes("parseInt(t['基本鐘點'] || '16'")) throw new Error('教師配課狀態仍將基本鐘點預設為 16');
+   if (!runtime.includes('slots.add(key.slice(code.length + 1))')) throw new Error('教師配課節數未依教師星期節次去重');
+   if (!runtime.includes('const overtime = scheduledHours - basicHours')) throw new Error('教師配課狀態未依實際節數計算超鐘點');
+   if (runtime.includes("parseInt(t['基本鐘點'] || '16'")) throw new Error('教師配課狀態仍將基本鐘點預設為 16');
+   if (!app.includes('const teacherTotalScheduled = idx.scheduledAssignedByTeacher?.[String(teacherCode)] ?? teacherFormalScheduled')) throw new Error('教師課表完成度仍排除第八節');
+   if (!app.includes('teacherFormalScheduled - basicHours')) throw new Error('教師超鐘點未使用正式鐘點計算');
 });
 check('Teacher palette counts bound co-classes once', () => {
   const start = runtime.indexOf('const baseBuildIndex = buildIndex;');

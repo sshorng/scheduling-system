@@ -1016,7 +1016,7 @@ function compressSlots(slots) {
 // GAS URL（契約 §3.C 三層優先序）
 // ============================================================
 const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycby8i5bnQ-oKZMO1HUQO6pJF6f_XQL8bQHO2Yj3nJ2D7NCzNZbe_bhks8hxTVZWWSxz7/exec";  // 已鎖定部署網址
-const FRONTEND_VERSION = '20260824_v1208_schedule_exceptions';
+const FRONTEND_VERSION = '20260826_v1209_schedule_core';
 
 function resolveGasUrl() {
   if (DEFAULT_GAS_URL && DEFAULT_GAS_URL.trim()) return DEFAULT_GAS_URL.trim();
@@ -1192,7 +1192,7 @@ let state = {
       { '班級代碼':'906','年級':'9','班級名稱':'九年六班','導師代碼':'','是否虛擬班':'FALSE' },
       { '班級代碼':'907','年級':'9','班級名稱':'九年七班(音樂班)','導師代碼':'','是否虛擬班':'FALSE' }
     ],     teachers: [], subjects:[],
-           assignments: [], schedule:[], scheduleRevision:'', teacherBlocks:[], subjectRules:[], subjectRelations:[], blockGroups:[], rooms:[], scheduleColors:[], teacherExclusives:[], scheduleExceptions:[], apiVersion:'', schemaVersion:'',
+            assignments: [], schedule:[], scheduleRevision:'', teacherBlocks:[], subjectRules:[], subjectRelations:[], blockGroups:[], rooms:[], scheduleColors:[], teacherExclusives:[], apiVersion:'', schemaVersion:'',
   settings:{}
 };
 let idx = {
@@ -1575,8 +1575,7 @@ const SCHEDULE_WRITE_ACTIONS = new Set([
 const MUTATING_GAS_ACTIONS = new Set([
   ...SCHEDULE_WRITE_ACTIONS,
   'saveMeta', 'renameTeacher', 'deleteMeta', 'saveTeacherBlock',
-  'saveSubjectRule', 'saveSubjectRelation', 'saveTeacherExclusive',
-  'saveScheduleException', 'initDatabase'
+  'saveSubjectRule', 'saveSubjectRelation', 'saveTeacherExclusive', 'initDatabase'
 ]);
 let _pendingScheduleWrites = 0;
 let _gasRequestTail = Promise.resolve();
@@ -1727,8 +1726,7 @@ function bgSync({ actionName, applyLocal, gasTask, rollbackLocal }) {
     teacherExclusives: JSON.parse(JSON.stringify(state.teacherExclusives || [])),
     blockGroups: JSON.parse(JSON.stringify(state.blockGroups || [])),
     rooms: JSON.parse(JSON.stringify(state.rooms || [])),
-    scheduleColors: JSON.parse(JSON.stringify(state.scheduleColors || [])),
-    scheduleExceptions: JSON.parse(JSON.stringify(state.scheduleExceptions || []))
+    scheduleColors: JSON.parse(JSON.stringify(state.scheduleColors || []))
   };
 
   // 1. 立即樂觀更新本地 UI（不阻塞 UI、不彈全頁 Loading）
@@ -1793,7 +1791,6 @@ function handleSyncFailure(actionName, errorMsg, snapshot, rollbackLocal) {
     state.blockGroups = snapshot.blockGroups;
     state.rooms = snapshot.rooms;
     state.scheduleColors = snapshot.scheduleColors;
-    state.scheduleExceptions = snapshot.scheduleExceptions;
   }
   buildIndex();
   if (typeof renderTabIfNeeded === 'function') renderTabIfNeeded(ui.activeTab);
@@ -1882,7 +1879,6 @@ function applyData(d) {
   state.rooms         = d.rooms         || [];
   state.scheduleColors= d.scheduleColors|| [];
   state.teacherExclusives = d.teacherExclusives || [];
-  state.scheduleExceptions = d.scheduleExceptions || [];
   state.apiVersion = String(d.gasVersion || '');
   state.schemaVersion = String(d.schemaVersion || '');
   state.settings      = d.settings      || {};
@@ -2629,7 +2625,6 @@ function renderAll() {
   renderBindGroupTab();
   renderConstraintsTab();
   renderStatsTab();
-  renderScheduleExceptionTab();
   if (ui.selectedClass)   renderClassTT(ui.selectedClass);
   if (ui.selectedTeacher) renderTeacherTT(ui.selectedTeacher);
   if (ui.selectedRoom)    renderRoomTT(ui.selectedRoom);
@@ -7083,273 +7078,6 @@ function renderStatsTab() {
   });
 }
 
-// ============================================================
-// 全校日期節次對調
-// ============================================================
-function scheduleExceptionDateInfo(value) {
-  const raw = String(value || '').trim();
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return null;
-  const date = new Date(raw + 'T00:00:00Z');
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== raw) return null;
-  return { date: raw, weekday: date.getUTCDay() };
-}
-
-function scheduleExceptionDayLabel(day) {
-  const value = parseInt(day, 10);
-  return DAY_NAMES[value] || '星期' + value;
-}
-
-function scheduleExceptionPeriodLabel(period) {
-  const value = parseInt(period, 10);
-  if (value === 0) return '早自習';
-  if (value === 45) return '午休';
-  return '第' + value + '節';
-}
-
-function scheduleExceptionJsArg(value) {
-  return "decodeURIComponent('" + encodeURIComponent(String(value || '')) + "')";
-}
-
-function scheduleExceptionFormRecord() {
-  const dateA = String(document.getElementById('exception-date-a')?.value || '').trim();
-  const dateB = String(document.getElementById('exception-date-b')?.value || '').trim();
-  const semester = String(state.settings?.['學期代號'] || '未設定').trim() || '未設定';
-  return {
-    '例外ID': String(document.getElementById('exception-id')?.value || '').trim() || ('EXC' + Date.now()),
-    '學期代號': semester,
-    '事件名稱': String(document.getElementById('exception-name')?.value || '').trim(),
-    '日期A': dateA,
-    '星期A': String(scheduleExceptionDateInfo(dateA)?.weekday || ''),
-    '節次A': String(document.getElementById('exception-period-a')?.value || '').trim(),
-    '日期B': dateB,
-    '星期B': String(scheduleExceptionDateInfo(dateB)?.weekday || ''),
-    '節次B': String(document.getElementById('exception-period-b')?.value || '').trim(),
-    '適用範圍': '全校',
-    '是否啟用': document.getElementById('exception-enabled')?.checked !== false ? 'TRUE' : 'FALSE',
-    '備註': String(document.getElementById('exception-remark')?.value || '').trim()
-  };
-}
-
-function validateScheduleExceptionRecord(record) {
-  if (!record['事件名稱']) return '請填寫事件名稱';
-  const dateA = scheduleExceptionDateInfo(record['日期A']);
-  const dateB = scheduleExceptionDateInfo(record['日期B']);
-  if (!dateA || !dateB) return '請填寫有效日期';
-  if (dateA.weekday < 1 || dateA.weekday > 5 || dateB.weekday < 1 || dateB.weekday > 5) return '日期例外目前只支援星期一至星期五';
-  if (parseInt(record['星期A'], 10) !== dateA.weekday || parseInt(record['星期B'], 10) !== dateB.weekday) return '日期與星期不一致，請重新選擇日期';
-  const periodA = parseInt(record['節次A'], 10);
-  const periodB = parseInt(record['節次B'], 10);
-  const validPeriod = period => period === 0 || period === 45 || (period >= 1 && period <= 8);
-  if (!Number.isInteger(periodA) || !validPeriod(periodA) || !Number.isInteger(periodB) || !validPeriod(periodB)) return '請選擇早自習、午休或第 1 節至第 8 節';
-  if (dateA.date === dateB.date && periodA === periodB) return '兩個對調端點不可相同';
-  return '';
-}
-
-function scheduleExceptionMappings(record) {
-  return [
-    { actualDate: record['日期A'], actualDay: record['星期A'], actualPeriod: record['節次A'], sourceDay: record['星期B'], sourcePeriod: record['節次B'] },
-    { actualDate: record['日期B'], actualDay: record['星期B'], actualPeriod: record['節次B'], sourceDay: record['星期A'], sourcePeriod: record['節次A'] }
-  ];
-}
-
-function scheduleExceptionIsEnabled(record) {
-  const value = String(record?.['是否啟用'] ?? '').trim().toUpperCase();
-  return record?.['是否啟用'] === true || value === 'TRUE' || value === '1' || value === 'YES' || value === '是';
-}
-
-function scheduleExceptionSlotKey(record, dateKey, periodKey) {
-  return String(record?.[dateKey] || '').trim() + '|' + String(record?.[periodKey] || '').trim();
-}
-
-function hasScheduleExceptionSlotConflict(record) {
-  if (!scheduleExceptionIsEnabled(record)) return false;
-  const id = String(record['例外ID'] || '').trim();
-  const occupied = new Set([
-    scheduleExceptionSlotKey(record, '日期A', '節次A'),
-    scheduleExceptionSlotKey(record, '日期B', '節次B')
-  ]);
-  return (state.scheduleExceptions || []).some(existing => {
-    if (!scheduleExceptionIsEnabled(existing) || String(existing['例外ID'] || '').trim() === id) return false;
-    return occupied.has(scheduleExceptionSlotKey(existing, '日期A', '節次A')) ||
-      occupied.has(scheduleExceptionSlotKey(existing, '日期B', '節次B'));
-  });
-}
-
-function clearScheduleExceptionForm() {
-  const values = {
-    'exception-id': '',
-    'exception-name': '全校時段對調',
-    'exception-date-a': '',
-    'exception-period-a': '1',
-    'exception-date-b': '',
-    'exception-period-b': '5',
-    'exception-remark': ''
-  };
-  Object.entries(values).forEach(([id, value]) => {
-    const element = document.getElementById(id);
-    if (element) element.value = value;
-  });
-  const enabled = document.getElementById('exception-enabled');
-  if (enabled) enabled.checked = true;
-  const saveButton = document.getElementById('exception-save-btn');
-  if (saveButton) saveButton.textContent = '➕ 建立對調事件';
-  renderScheduleExceptionPreview();
-}
-
-function renderScheduleExceptionTable() {
-  const tbody = document.getElementById('exception-tbody');
-  if (!tbody) return;
-  const records = [...(state.scheduleExceptions || [])].sort((left, right) =>
-    String(left['日期A'] || '').localeCompare(String(right['日期A'] || '')) ||
-    String(left['事件名稱'] || '').localeCompare(String(right['事件名稱'] || ''), 'zh-Hant')
-  );
-  tbody.innerHTML = records.length ? records.map(record => {
-    const id = scheduleExceptionJsArg(record['例外ID']);
-    const enabled = scheduleExceptionIsEnabled(record);
-    const status = enabled ? '<span class="badge badge-green">啟用中</span>' : '<span class="badge badge-gray">已停用</span>';
-    const mapping = esc(String(record['日期A'] || '') + '（' + scheduleExceptionDayLabel(record['星期A']) + '）' + scheduleExceptionPeriodLabel(record['節次A'])) +
-      ' ↔ ' + esc(String(record['日期B'] || '') + '（' + scheduleExceptionDayLabel(record['星期B']) + '）' + scheduleExceptionPeriodLabel(record['節次B']));
-    return '<tr>' +
-      '<td><strong>' + esc(record['事件名稱'] || '未命名事件') + '</strong><div class="text-muted text-xs">' + esc(record['學期代號'] || '') + '</div></td>' +
-      '<td>' + mapping + '</td>' +
-      '<td>' + status + '</td>' +
-      '<td>' + esc(record['備註'] || '') + '</td>' +
-      '<td class="inline-actions"><button class="btn btn-ghost btn-xs" onclick="editScheduleException(' + id + ')">✏️ 編輯</button> ' +
-      '<button class="btn ' + (enabled ? 'btn-danger' : 'btn-primary') + ' btn-xs" onclick="toggleScheduleException(' + id + ')">' + (enabled ? '停用' : '啟用') + '</button></td>' +
-      '</tr>';
-  }).join('') : '<tr><td colspan="5" class="text-center text-muted">目前尚未建立日期節次對調事件</td></tr>';
-}
-
-function scheduleExceptionImpact(day, period) {
-  const entries = (state.schedule || []).filter(entry =>
-    !isPatrolScheduleEntry(entry) && parseInt(entry['星期'], 10) === parseInt(day, 10) && parseInt(entry['節次'], 10) === parseInt(period, 10)
-  );
-  const classes = new Set();
-  const teachers = new Set();
-  const rooms = new Set();
-  entries.forEach(entry => {
-    String(entry['班級代碼'] || '').split(/[,，、;；]/).map(value => value.trim()).filter(Boolean).forEach(value => classes.add(value));
-    if (typeof getCellTeacherList === 'function') {
-      getCellTeacherList(entry).forEach(item => {
-        const teacher = String(item['教師姓名'] || item['姓名'] || '').trim();
-        if (teacher) teachers.add(teacher);
-      });
-    } else {
-      String(entry['教師姓名'] || '').split(/[,，、;；]/).map(value => value.trim()).filter(Boolean).forEach(value => teachers.add(value));
-    }
-    const subject = idx.subjectByCode?.[String(entry['科目代碼'] || '').trim()];
-    const room = String(subject?.['所屬教室代碼'] || '').trim();
-    if (room) rooms.add(room);
-  });
-  return { lessons: entries.length, classes: classes.size, teachers: teachers.size, rooms: rooms.size };
-}
-
-function renderScheduleExceptionPreview() {
-  const wrap = document.getElementById('exception-preview');
-  if (!wrap) return;
-  const record = scheduleExceptionFormRecord();
-  const error = validateScheduleExceptionRecord(record);
-  if (error) {
-    wrap.innerHTML = '<div class="exception-preview-empty">填妥兩個日期與節次後，這裡會顯示兩筆反向映射及影響範圍。</div>';
-    return;
-  }
-  const cards = scheduleExceptionMappings(record).map(mapping => {
-    const impact = scheduleExceptionImpact(mapping.sourceDay, mapping.sourcePeriod);
-    return '<div class="exception-preview-card">' +
-      '<div class="exception-preview-kicker">實際日期</div>' +
-      '<strong>' + esc(mapping.actualDate) + '（' + esc(scheduleExceptionDayLabel(mapping.actualDay)) + '）' + esc(scheduleExceptionPeriodLabel(mapping.actualPeriod)) + '</strong>' +
-      '<div class="exception-preview-arrow">套用固定週課表：' + esc(scheduleExceptionDayLabel(mapping.sourceDay)) + esc(scheduleExceptionPeriodLabel(mapping.sourcePeriod)) + '</div>' +
-      '<div class="exception-impact">' + impact.classes + ' 班／' + impact.teachers + ' 位教師／' + impact.rooms + ' 間專科教室，共 ' + impact.lessons + ' 筆課程</div>' +
-      '</div>';
-  }).join('');
-  wrap.innerHTML = cards;
-}
-
-function renderScheduleExceptionTab() {
-  const semester = document.getElementById('exception-semester');
-  if (semester) semester.textContent = String(state.settings?.['學期代號'] || '未設定');
-  renderScheduleExceptionTable();
-  renderScheduleExceptionPreview();
-}
-
-function editScheduleException(id) {
-  const record = (state.scheduleExceptions || []).find(item => String(item['例外ID']) === String(id));
-  if (!record) return;
-  const values = {
-    'exception-id': record['例外ID'] || '',
-    'exception-name': record['事件名稱'] || '',
-    'exception-date-a': record['日期A'] || '',
-    'exception-period-a': record['節次A'] || '1',
-    'exception-date-b': record['日期B'] || '',
-    'exception-period-b': record['節次B'] || '5',
-    'exception-remark': record['備註'] || ''
-  };
-  Object.entries(values).forEach(([field, value]) => {
-    const element = document.getElementById(field);
-    if (element) element.value = value;
-  });
-  const enabled = document.getElementById('exception-enabled');
-  if (enabled) enabled.checked = scheduleExceptionIsEnabled(record);
-  const saveButton = document.getElementById('exception-save-btn');
-  if (saveButton) saveButton.textContent = '💾 儲存對調事件';
-  renderScheduleExceptionPreview();
-  document.getElementById('exception-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function saveScheduleException() {
-  const record = scheduleExceptionFormRecord();
-  const error = validateScheduleExceptionRecord(record);
-  if (error) { toast(error, 'warning'); return; }
-  if (hasScheduleExceptionSlotConflict(record)) {
-    toast('指定日期與節次已被其他啟用中的對調事件占用', 'warning');
-    return;
-  }
-  const editingId = String(document.getElementById('exception-id')?.value || '').trim();
-  const existed = (state.scheduleExceptions || []).some(item => String(item['例外ID']) === String(record['例外ID']));
-  bgSync({
-    actionName: editingId || existed ? '更新全校時段對調' : '新增全校時段對調',
-    applyLocal: () => {
-      state.scheduleExceptions = (state.scheduleExceptions || []).filter(item => String(item['例外ID']) !== String(record['例外ID']));
-      state.scheduleExceptions.push(record);
-      clearScheduleExceptionForm();
-      renderScheduleExceptionTable();
-    },
-    gasTask: () => gasPost('saveScheduleException', record)
-  });
-}
-
-function toggleScheduleException(id) {
-  const current = (state.scheduleExceptions || []).find(item => String(item['例外ID']) === String(id));
-  if (!current) return;
-  const next = { ...current, '是否啟用': scheduleExceptionIsEnabled(current) ? 'FALSE' : 'TRUE' };
-  if (next['是否啟用'] === 'TRUE' && hasScheduleExceptionSlotConflict(next)) {
-    toast('指定日期與節次已被其他啟用中的對調事件占用', 'warning');
-    return;
-  }
-  const action = next['是否啟用'] === 'TRUE' ? '啟用全校時段對調' : '停用全校時段對調';
-  bgSync({
-    actionName: action,
-    applyLocal: () => {
-      state.scheduleExceptions = (state.scheduleExceptions || []).map(item => String(item['例外ID']) === String(id) ? next : item);
-      renderScheduleExceptionTable();
-      renderScheduleExceptionPreview();
-    },
-    gasTask: () => gasPost('saveScheduleException', next)
-  });
-}
-
-async function exportScheduleExceptions() {
-  showLoading(true);
-  const result = await gasPost('exportScheduleExceptions', {});
-  showLoading(false);
-  if (!result || !result.ok) {
-    toast('課表例外匯出失敗：' + String(result?.error || '無回應'), 'error');
-    return;
-  }
-  toast('已匯出「' + result.data.sheetName + '」（' + result.data.rowCount + ' 筆反向映射）', 'success');
-}
-
 async function doExport() {
   showLoading(true);
   const res = await gasPost('exportSchedule', {});
@@ -7393,7 +7121,6 @@ function activateMainTab(tab) {
     if (tab === 'constraints') renderConstraintsTab();
     if (tab === 'stats') renderStatsTab();
     if (tab === 'room') renderRoomSelect();
-    if (tab === 'exceptions') renderScheduleExceptionTab();
   }
   saveUIState();
 }
@@ -7663,7 +7390,6 @@ function getDemoData() {
       { '規則ID':'R02','科目代碼':'體育','時段':'1-8','規則類型':'禁排','備註':'最後節不排體育' },
     ],
     subjectRelations: [],
-    scheduleExceptions: [],
     blockGroups: [
       { '群組ID':'BG01', '群組名稱':'七年級聯課', '科目清單':'體育,班週會', '班級清單':'701,702,703' },
     ],

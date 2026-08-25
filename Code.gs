@@ -11,15 +11,15 @@
 
 // ===================== 工作表定義 =====================
 
-const GAS_VERSION = '20260824_v1208_schedule_exceptions';
-const SCHEMA_VERSION = '20260824_bilingual_course_v4_schedule_exception';
+const GAS_VERSION = '20260826_v1209_schedule_core';
+const SCHEMA_VERSION = '20260826_bilingual_course_v5';
 
 // 所有會改動試算表的動作共用同一把 ScriptLock，避免多視窗或快速連點互相覆寫。
 const LOCKED_WRITE_ACTIONS = new Set([
   'ensureSchema', 'updateCell', 'clearCell', 'swapCells', 'lockCell', 'setOvertime', 'batchSetOvertime',
   'saveMeta', 'renameTeacher', 'deleteMeta', 'saveTeacherBlock', 'saveSubjectRule',
   'saveSubjectRelation', 'saveTeacherExclusive', 'savePatrolSchedule',
-  'saveScheduleException', 'initDatabase', 'batchUpdateSchedule'
+  'initDatabase', 'batchUpdateSchedule'
 ]);
 
 const SHEET_DEFS = {
@@ -42,10 +42,6 @@ const SHEET_DEFS = {
   '課表': {
     headers: ['課表ID', '班級代碼', '星期', '節次', '科目代碼', '教師姓名', '課堂屬性', '是否鎖定'],
     key: '課表ID'
-  },
-  '課表例外': {
-    headers: ['例外ID', '學期代號', '事件名稱', '日期A', '星期A', '節次A', '日期B', '星期B', '節次B', '適用範圍', '是否啟用', '備註'],
-    key: '例外ID'
   },
   '不排課': {
     headers: ['記錄ID', '教師姓名', '時段', '原因'],
@@ -159,10 +155,8 @@ function doPost(e) {
       case 'saveSubjectRule':   result = saveSubjectRule_(ss, payload); break;
       case 'saveSubjectRelation': result = saveSubjectRelation_(ss, payload); break;
       case 'saveTeacherExclusive': result = saveTeacherExclusive_(ss, payload); break;
-      case 'saveScheduleException': result = saveScheduleException_(ss, payload); break;
       case 'exportSchedule':    result = exportSchedule_(ss); break;
       case 'exportPatrolSchedule': result = exportPatrolSchedule_(ss); break;
-      case 'exportScheduleExceptions': result = exportScheduleExceptions_(ss); break;
       case 'savePatrolSchedule': result = savePatrolSchedule_(ss, payload); break;
       case 'exportTeachers':    result = exportTeachers_(ss); break;
       case 'initDatabase':      result = initDefaultData_(ss, payload.overwrite); break;
@@ -457,11 +451,6 @@ function ensureScheduleSchema_(sheet) {
   ensureNamedSchema_(sheet, '課表');
 }
 
-function ensureScheduleExceptionSchema_(sheet) {
-  ensureNamedSchema_(sheet, '課表例外');
-  if (sheet) sheet.getRange('A:L').setNumberFormat('@');
-}
-
 function ensureAllSheets_(ss) {
   Object.entries(SHEET_DEFS).forEach(([name, def]) => {
     let sh = ss.getSheetByName(name);
@@ -490,10 +479,6 @@ function ensureAllSheets_(ss) {
       }
       if (name === '課表') {
         ensureScheduleSchema_(sh);
-        return;
-      }
-      if (name === '課表例外') {
-        ensureScheduleExceptionSchema_(sh);
         return;
       }
       if (name === '科目規則') ensureSubjectRuleSchema_(sh);
@@ -526,9 +511,6 @@ function ensureAllSheets_(ss) {
   }
   const relationSh = ss.getSheetByName('科目關係');
   if (relationSh) relationSh.getRange('A:F').setNumberFormat('@');
-  const exceptionSh = ss.getSheetByName('課表例外');
-  if (exceptionSh) exceptionSh.getRange('A:L').setNumberFormat('@');
-
   // 系統設定預設值
   const settingSh = ss.getSheetByName('設定');
   const existing = sheetToObjects_(settingSh);
@@ -613,159 +595,7 @@ function getAll_(ss) {
     rooms:              sheetToObjects_(ss.getSheetByName('教室')),
     scheduleColors:     sheetToObjects_(ss.getSheetByName('配色')),
     teacherExclusives:  sheetToObjects_(ss.getSheetByName('互斥')),
-    scheduleExceptions: sheetToObjects_(ss.getSheetByName('課表例外')),
     settings:           getSettingsMap_(ss)
-  };
-}
-
-// ===================== 課表日期例外 =====================
-
-function scheduleExceptionTruthy_(value) {
-  const text = String(value == null ? '' : value).trim().toUpperCase();
-  return value === true || text === 'TRUE' || text === '1' || text === 'YES' || text === 'Y' || text === '是';
-}
-
-function scheduleExceptionDateInfo_(value) {
-  const raw = String(value == null ? '' : value).trim();
-  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return null;
-  const year = parseInt(match[1], 10);
-  const month = parseInt(match[2], 10);
-  const day = parseInt(match[3], 10);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
-  const weekday = date.getUTCDay();
-  return { date: raw, weekday };
-}
-
-function scheduleExceptionPayloadValue_(payload, names, fallback) {
-  const source = payload && typeof payload === 'object' ? payload : {};
-  for (let i = 0; i < names.length; i++) {
-    if (source[names[i]] !== undefined && source[names[i]] !== null) return source[names[i]];
-  }
-  return fallback;
-}
-
-function normalizeScheduleExceptionRecord_(payload) {
-  const source = payload && payload.record && typeof payload.record === 'object' ? payload.record : payload;
-  const id = String(scheduleExceptionPayloadValue_(source, ['例外ID', 'id'], '') || '').trim() || genId_();
-  const semester = String(scheduleExceptionPayloadValue_(source, ['學期代號', 'semester'], '') || '').trim();
-  const eventName = String(scheduleExceptionPayloadValue_(source, ['事件名稱', 'eventName'], '') || '').trim();
-  const dateA = scheduleExceptionDateInfo_(scheduleExceptionPayloadValue_(source, ['日期A', 'dateA'], ''));
-  const dateB = scheduleExceptionDateInfo_(scheduleExceptionPayloadValue_(source, ['日期B', 'dateB'], ''));
-  const dayA = parseInt(scheduleExceptionPayloadValue_(source, ['星期A', 'dayA'], ''), 10);
-  const dayB = parseInt(scheduleExceptionPayloadValue_(source, ['星期B', 'dayB'], ''), 10);
-  const periodA = parseInt(scheduleExceptionPayloadValue_(source, ['節次A', 'periodA'], ''), 10);
-  const periodB = parseInt(scheduleExceptionPayloadValue_(source, ['節次B', 'periodB'], ''), 10);
-  const scope = String(scheduleExceptionPayloadValue_(source, ['適用範圍', 'scope'], '全校') || '全校').trim() || '全校';
-  const enabled = scheduleExceptionTruthy_(scheduleExceptionPayloadValue_(source, ['是否啟用', 'enabled'], true));
-  const remark = String(scheduleExceptionPayloadValue_(source, ['備註', 'remark'], '') || '').trim();
-
-  if (!semester) return { ok: false, error: '學期代號不能空白' };
-  if (!eventName) return { ok: false, error: '事件名稱不能空白' };
-  if (!dateA || !dateB) return { ok: false, error: '日期格式必須是 YYYY-MM-DD' };
-  if (dateA.weekday < 1 || dateA.weekday > 5 || dateB.weekday < 1 || dateB.weekday > 5) {
-    return { ok: false, error: '日期例外目前只支援星期一至星期五' };
-  }
-  if (!Number.isInteger(dayA) || dayA < 1 || dayA > 5 || dayA !== dateA.weekday) {
-    return { ok: false, error: '日期 A 的星期與實際日期不一致' };
-  }
-  if (!Number.isInteger(dayB) || dayB < 1 || dayB > 5 || dayB !== dateB.weekday) {
-    return { ok: false, error: '日期 B 的星期與實際日期不一致' };
-  }
-  const validPeriod = period => period === 0 || period === 45 || (period >= 1 && period <= 8);
-  if (!Number.isInteger(periodA) || !validPeriod(periodA) || !Number.isInteger(periodB) || !validPeriod(periodB)) {
-    return { ok: false, error: '時段目前只支援早自習、午休或第 1 節至第 8 節' };
-  }
-  if (dateA.date === dateB.date && periodA === periodB) return { ok: false, error: '兩個對調端點不可相同' };
-  if (scope !== '全校') return { ok: false, error: '目前只支援全校適用範圍' };
-
-  return {
-    ok: true,
-    record: {
-      '例外ID': id,
-      '學期代號': semester,
-      '事件名稱': eventName,
-      '日期A': dateA.date,
-      '星期A': String(dayA),
-      '節次A': String(periodA),
-      '日期B': dateB.date,
-      '星期B': String(dayB),
-      '節次B': String(periodB),
-      '適用範圍': scope,
-      '是否啟用': enabled ? 'TRUE' : 'FALSE',
-      '備註': remark
-    }
-  };
-}
-
-function scheduleExceptionMappings_(record) {
-  if (!record) return [];
-  return [
-    {
-      '例外ID': String(record['例外ID'] || ''),
-      '事件名稱': String(record['事件名稱'] || ''),
-      '實際日期': String(record['日期A'] || ''),
-      '實際星期': String(record['星期A'] || ''),
-      '實際節次': String(record['節次A'] || ''),
-      '來源星期': String(record['星期B'] || ''),
-      '來源節次': String(record['節次B'] || ''),
-      '是否啟用': String(record['是否啟用'] || 'FALSE')
-    },
-    {
-      '例外ID': String(record['例外ID'] || ''),
-      '事件名稱': String(record['事件名稱'] || ''),
-      '實際日期': String(record['日期B'] || ''),
-      '實際星期': String(record['星期B'] || ''),
-      '實際節次': String(record['節次B'] || ''),
-      '來源星期': String(record['星期A'] || ''),
-      '來源節次': String(record['節次A'] || ''),
-      '是否啟用': String(record['是否啟用'] || 'FALSE')
-    }
-  ];
-}
-
-function scheduleExceptionSlotKey_(date, period) {
-  return String(date || '').trim() + '|' + String(period || '').trim();
-}
-
-function saveScheduleException_(ss, payload) {
-  const sheet = ss.getSheetByName('課表例外');
-  if (!sheet) return { ok: false, error: '找不到「課表例外」工作表' };
-  const source = payload && payload.record && typeof payload.record === 'object' ? payload.record : payload;
-  const settings = getSettingsMap_(ss);
-  const withSemester = Object.assign({}, source || {});
-  if (!String(withSemester['學期代號'] || withSemester.semester || '').trim()) {
-    withSemester['學期代號'] = settings['學期代號'] || '未設定';
-  }
-  const normalized = normalizeScheduleExceptionRecord_(withSemester);
-  if (!normalized.ok) return normalized;
-
-  const record = normalized.record;
-  const currentRows = sheetToObjects_(sheet);
-  const rowNumber = findDataRowByKey_(sheet, SHEET_DEFS['課表例外'], record['例外ID']);
-  const newSlots = new Set(scheduleExceptionMappings_(record).map(item =>
-    scheduleExceptionSlotKey_(item['實際日期'], item['實際節次'])
-  ));
-  if (record['是否啟用'] === 'TRUE') {
-    const duplicate = currentRows.find(row => {
-      if (String(row['例外ID'] || '').trim() === record['例外ID']) return false;
-      if (!scheduleExceptionTruthy_(row['是否啟用'])) return false;
-      return scheduleExceptionMappings_(row).some(item => newSlots.has(
-        scheduleExceptionSlotKey_(item['實際日期'], item['實際節次'])
-      ));
-    });
-    if (duplicate) return { ok: false, error: '指定日期與節次已被其他啟用中的課表例外占用：' + String(duplicate['事件名稱'] || duplicate['例外ID']) };
-  }
-
-  const values = SHEET_DEFS['課表例外'].headers.map(header => numericStringToText_(record[header]));
-  if (rowNumber) sheet.getRange(rowNumber, 1, 1, values.length).setValues([values]);
-  else sheet.appendRow(values);
-  return {
-    ok: true,
-    record,
-    mappings: scheduleExceptionMappings_(record),
-    updated: Boolean(rowNumber)
   };
 }
 
@@ -1586,7 +1416,6 @@ function saveClassMeta_(sheet, data) {
 
 function saveMeta_(ss, p) {
   if (p.type === '科目關係') return saveSubjectRelation_(ss, p);
-  if (p.type === '課表例外') return saveScheduleException_(ss, p.data || {});
   const sheet = ss.getSheetByName(p.type);
   if (!sheet) throw new Error('找不到工作表：' + p.type);
   const def = SHEET_DEFS[p.type];
@@ -2000,34 +1829,6 @@ function exportScheduleRowId_(scheduleRow, semesterId, scheduleIndex, teacherCou
   while (usedIds.has(id)) id = base + '__export' + suffix++;
   usedIds.add(id);
   return id;
-}
-
-function exportScheduleExceptions_(ss) {
-  const settings = getSettingsMap_(ss);
-  const semId = settings['學期代號'] || '114-1';
-  const exceptions = sheetToObjects_(ss.getSheetByName('課表例外'))
-    .filter(row => scheduleExceptionTruthy_(row['是否啟用']))
-    .filter(row => String(row['學期代號'] || semId).trim() === semId)
-    .sort((left, right) => String(left['日期A'] || '').localeCompare(String(right['日期A'] || '')));
-  const headers = ['學期代號', '例外ID', '事件名稱', '實際日期', '實際星期', '實際節次', '來源星期', '來源節次', '適用範圍', '備註'];
-  const rows = [];
-  exceptions.forEach(exception => {
-    scheduleExceptionMappings_(exception).forEach(mapping => {
-      rows.push([
-        String(exception['學期代號'] || semId),
-        String(exception['例外ID'] || ''),
-        String(exception['事件名稱'] || ''),
-        String(mapping['實際日期'] || ''),
-        parseInt(mapping['實際星期'], 10),
-        parseInt(mapping['實際節次'], 10),
-        parseInt(mapping['來源星期'], 10),
-        parseInt(mapping['來源節次'], 10),
-        String(exception['適用範圍'] || '全校'),
-        String(exception['備註'] || '')
-      ]);
-    });
-  });
-  return writeExportSheet_(ss, '課表例外匯出_' + semId, headers, rows);
 }
 
 function exportSchedule_(ss) {

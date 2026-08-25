@@ -805,7 +805,7 @@ check('Subject relation soft rule is wired end to end', () => {
   if (!backend.includes("'科目關係':")) throw new Error('subject relation sheet definition missing');
   if (!backend.includes("headers: ['規則ID', '科目A', '科目B', '適用年級', '適用班級', '備註']")) throw new Error('subject relation schema missing');
   if (!backend.includes("subjectRelations:   sheetToObjects_(ss.getSheetByName('科目關係'))")) throw new Error('getAll does not return subject relations');
-       if (!backend.includes("const GAS_VERSION = '20260824_v1208_schedule_exceptions';")) throw new Error('GAS version marker missing');
+        if (!backend.includes("const GAS_VERSION = '20260826_v1209_schedule_core';")) throw new Error('GAS version marker missing');
   if (!backend.includes('function saveSubjectRelation_(ss, p)')) throw new Error('atomic subject relation save missing');
   if (!backend.includes("case 'saveSubjectRelation': result = saveSubjectRelation_(ss, payload); break;")) throw new Error('subject relation save route missing');
   for (const marker of [
@@ -830,45 +830,6 @@ check('Subject relation soft rule is wired end to end', () => {
     '綁班共時'
   ]) if (!html.includes(marker) && !app.includes(marker)) throw new Error('subject relation UI missing：' + marker);
  if (!app.includes("gasPost('saveSubjectRelation', { data: newRule })")) throw new Error('subject relation save is not atomic');
- });
-check('Schedule exceptions preserve the weekly timetable and create reverse mappings', () => {
-  for (const marker of [
-    "'課表例外':",
-    "headers: ['例外ID', '學期代號', '事件名稱', '日期A', '星期A', '節次A', '日期B', '星期B', '節次B', '適用範圍', '是否啟用', '備註']",
-    'scheduleExceptions: sheetToObjects_(ss.getSheetByName(\'課表例外\'))',
-    "case 'saveScheduleException': result = saveScheduleException_(ss, payload); break;",
-    "if (p.type === '課表例外') return saveScheduleException_(ss, p.data || {});",
-    'function exportScheduleExceptions_(ss)',
-    'function scheduleExceptionMappings_(record)'
-  ]) if (!backend.includes(marker)) throw new Error('課表例外後端契約缺少：' + marker);
-  for (const marker of [
-    'data-tab="exceptions"',
-    'id="panel-exceptions"',
-    'id="exception-preview"',
-    'scheduleExceptions',
-    "gasPost('saveScheduleException', record)",
-    "gasPost('exportScheduleExceptions', {})"
-  ]) if (!html.includes(marker) && !app.includes(marker)) throw new Error('課表例外前端接點缺少：' + marker);
-
-  const context = { console };
-  vm.createContext(context);
-  vm.runInContext(backend, context, { filename: 'schedule-exception.js' });
-  const valid = context.normalizeScheduleExceptionRecord_({
-    '例外ID': 'EX1', '學期代號': '115-1', '事件名稱': '開學週時段對調',
-    '日期A': '2026-08-31', '星期A': '1', '節次A': '1',
-    '日期B': '2026-09-04', '星期B': '5', '節次B': '5',
-    '適用範圍': '全校', '是否啟用': 'TRUE', '備註': ''
-  });
-  if (!valid.ok) throw new Error('有效日期例外未通過驗證：' + valid.error);
-  const mappings = context.scheduleExceptionMappings_(valid.record);
-  if (mappings.length !== 2 || mappings[0]['來源星期'] !== '5' || mappings[1]['來源星期'] !== '1') {
-    throw new Error('日期例外未產生兩筆反向映射');
-  }
-  const weekend = context.normalizeScheduleExceptionRecord_(Object.assign({}, valid.record, {
-    '日期A': '2026-08-30', '星期A': '0'
-  }));
-  if (weekend.ok || !String(weekend.error || '').includes('星期一至星期五')) throw new Error('週末日期未被拒絕');
-  if (!app.includes("const FRONTEND_VERSION = '20260824_v1208_schedule_exceptions';")) throw new Error('frontend version marker missing');
  });
 check('Subject relation warning respects class scope', () => {
   const scopeStart = app.indexOf('function splitRuleScopeList');
@@ -902,11 +863,18 @@ check('Subject relation warning respects class scope', () => {
   if (context.getSubjectRelationWarnings(2, '國文', '701', schedule).length !== 1) throw new Error('綁班不應停用同班科目關係');
 });
 check('Frontend and backend versions use a handshake', () => {
-    if (!app.includes("const FRONTEND_VERSION = '20260824_v1208_schedule_exceptions';")) throw new Error('frontend version marker missing');
+    if (!app.includes("const FRONTEND_VERSION = '20260826_v1209_schedule_core';")) throw new Error('frontend version marker missing');
   if (!app.includes('res.data.gasVersion')) throw new Error('frontend does not read GAS version');
   if (!app.includes('前後端版本不同')) throw new Error('version mismatch warning missing');
   if (!backend.includes('gasVersion:          GAS_VERSION')) throw new Error('GAS getAll version missing');
   if (!backend.includes('schemaVersion:       SCHEMA_VERSION')) throw new Error('GAS schema version missing');
+});
+check('Schedule exception feature is removed', () => {
+  for (const marker of ['scheduleExceptions', 'ScheduleException', '日期調整', '課表例外', 'exception-page', 'saveScheduleException', 'exportScheduleExceptions']) {
+    if ([app, runtime, backend, html, styles].some(source => source.includes(marker))) {
+      throw new Error('日期調整功能殘留：' + marker);
+    }
+  }
 });
 check('Backend snapshot audit blocks teacher consecutive overflow', () => {
   const context = { console };
@@ -2220,7 +2188,7 @@ check('Main tab DOM hierarchy', () => {
     if (id) parents[id] = stack[stack.length - 1] || '(root)';
     stack.push(id || 'div');
   }
-  for (const id of ['panel-timetable','panel-config','panel-constraints','panel-stats','panel-exceptions']) if (parents[id] !== 'main') throw new Error(`${id} parent is ${parents[id]}`);
+  for (const id of ['panel-timetable','panel-config','panel-constraints','panel-stats']) if (parents[id] !== 'main') throw new Error(`${id} parent is ${parents[id]}`);
   if (parents['subpanel-constraints-block'] !== 'panel-constraints') throw new Error('teacher constraint panel nesting');
   if (parents['subpanel-constraints-rule'] !== 'panel-constraints') throw new Error('subject constraint panel nesting');
   if (parents['subpanel-constraints-relation'] !== 'panel-constraints') throw new Error('subject relation panel nesting');

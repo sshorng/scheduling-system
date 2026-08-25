@@ -77,33 +77,6 @@
      .tab-panel { display: none; }
      .tab-panel.active { display: block; }
 
-     /* ===== 日期節次對調 ===== */
-     .exception-page { max-width: 1180px; margin: 0 auto; display: grid; gap: 14px; }
-     .exception-hero { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-     .exception-kicker { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .08em; margin-bottom: 2px; }
-     .exception-scope-readonly { min-height: 34px; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--ink-2); }
-     .exception-enabled-control { display: flex; align-items: center; gap: 7px; align-self: flex-end; min-height: 34px; padding-bottom: 7px; white-space: nowrap; color: var(--ink-2); font-size: 12px; font-weight: 600; cursor: pointer; }
-     .exception-endpoint-grid { display: grid; grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr); gap: 10px; align-items: center; margin-top: 6px; }
-     .exception-endpoint-card { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
-     .exception-endpoint-title { margin-bottom: 8px; color: var(--accent-dark); font-size: 13px; font-weight: 700; }
-     .exception-swap-mark { color: var(--accent); font-size: 22px; font-weight: 700; text-align: center; }
-     .exception-preview-heading { margin-top: 14px; margin-bottom: 8px; color: var(--ink-2); font-size: 12px; font-weight: 700; }
-     .exception-preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-     .exception-preview-card { padding: 11px 12px; border: 1px solid #bfdbfe; border-radius: var(--radius-sm); background: #eff6ff; }
-     .exception-preview-kicker { color: var(--accent-dark); font-size: 10px; font-weight: 700; letter-spacing: .06em; }
-     .exception-preview-card strong { display: block; margin: 2px 0 6px; font-size: 13px; }
-     .exception-preview-arrow { color: var(--ink-2); font-size: 12px; }
-     .exception-impact { margin-top: 7px; color: var(--accent-dark); font-size: 11px; font-weight: 600; }
-     .exception-preview-empty { grid-column: 1 / -1; padding: 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); color: var(--muted); font-size: 12px; text-align: center; }
-     .exception-table-scroll { overflow-x: auto; }
-     @media (max-width: 760px) {
-       .exception-hero { align-items: flex-start; flex-direction: column; }
-       .exception-endpoint-grid { grid-template-columns: 1fr; }
-       .exception-swap-mark { transform: rotate(90deg); }
-       .exception-preview-grid { grid-template-columns: 1fr; }
-       .exception-enabled-control { align-self: flex-start; padding-bottom: 0; }
-     }
-
      /* ===== 課表比對工作台 ===== */
     .tt-layout-toolbar {
       display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;

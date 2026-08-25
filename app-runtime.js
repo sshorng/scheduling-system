@@ -1452,7 +1452,6 @@
       if (name === 'config') { renderConfigTab(); renderBindGroupTab(); }
       if (name === 'constraints') renderConstraintsTab();
       if (name === 'stats') renderStatsTab();
-      if (name === 'exceptions') renderScheduleExceptionTab();
       if (name === 'room') renderRoomSelect();
       renderedRevision[name] = revision;
       return true;

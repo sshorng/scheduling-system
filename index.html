@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260824_v1208_schedule_exceptions">
+    <link rel="stylesheet" href="style.css?v=20260826_v1209_schedule_core">
 </head>
 <body>
 
@@ -24,8 +24,7 @@
     <button class="tab-btn" data-tab="config">📋 配課</button>
      <button class="tab-btn" data-tab="constraints">⛔ 限制</button>
      <button class="tab-btn" data-tab="stats">📊 統計</button>
-     <button class="tab-btn" data-tab="exceptions">📅 日期調整</button>
-     <button class="tab-btn" data-tab="room">🏫 教室</button>
+      <button class="tab-btn" data-tab="room">🏫 教室</button>
   </div>
   <div id="topbar-right">
     <div id="status-dot" title="連線狀態"></div>
@@ -196,100 +195,6 @@
         <span style="margin-left:auto;font-size:12px;color:#ef4444;"><b>⚠ 紅底</b> = 教室衝堂</span>
       </div>
       <div id="room-tt"><p style="color:var(--text-muted);padding:16px;">請選擇教室</p></div>
-    </div>
-  </div>
-
-  <!-- ── Tab 6：日期節次對調 ── -->
-  <div class="tab-panel" id="panel-exceptions">
-    <div class="exception-page">
-      <div class="panel-card exception-hero">
-        <div>
-          <div class="exception-kicker">校務調整</div>
-          <div class="panel-title" style="margin-bottom:4px;">📅 全校時段對調</div>
-          <p class="text-muted">固定週課表維持不變，只在指定日期套用兩個反向時段映射。適用學期：<strong id="exception-semester">未設定</strong>。</p>
-        </div>
-        <button class="btn btn-ghost btn-sm" type="button" onclick="exportScheduleExceptions()">📤 匯出例外映射</button>
-      </div>
-
-      <div class="panel-card exception-editor" id="exception-editor">
-        <div class="panel-title">建立一次性對調事件</div>
-        <input id="exception-id" type="hidden">
-        <div class="form-row">
-          <div class="form-group" style="min-width:220px;">
-            <label for="exception-name">事件名稱</label>
-            <input id="exception-name" type="text" value="全校時段對調">
-          </div>
-          <div class="form-group" style="min-width:180px;">
-            <label>適用範圍</label>
-            <div class="exception-scope-readonly">全校</div>
-          </div>
-          <div class="form-group" style="min-width:220px;">
-            <label for="exception-remark">備註（選填）</label>
-            <input id="exception-remark" type="text">
-          </div>
-          <label class="exception-enabled-control" for="exception-enabled">
-            <input id="exception-enabled" type="checkbox" checked>
-            儲存後立即啟用
-          </label>
-        </div>
-
-        <div class="exception-endpoint-grid">
-          <section class="exception-endpoint-card">
-            <div class="exception-endpoint-title">端點 A</div>
-            <div class="form-row">
-              <div class="form-group">
-                <label for="exception-date-a">實際日期</label>
-                <input id="exception-date-a" type="date" onchange="renderScheduleExceptionPreview()">
-              </div>
-              <div class="form-group">
-                <label for="exception-period-a">節次</label>
-                <select id="exception-period-a" onchange="renderScheduleExceptionPreview()">
-                  <option value="0">早自習</option><option value="1" selected>第 1 節</option><option value="2">第 2 節</option><option value="3">第 3 節</option><option value="4">第 4 節</option>
-                  <option value="5">第 5 節</option><option value="6">第 6 節</option><option value="7">第 7 節</option><option value="8">第 8 節</option>
-                  <option value="45">午休</option>
-                </select>
-              </div>
-            </div>
-          </section>
-          <div class="exception-swap-mark" aria-hidden="true">↔</div>
-          <section class="exception-endpoint-card">
-            <div class="exception-endpoint-title">端點 B</div>
-            <div class="form-row">
-              <div class="form-group">
-                <label for="exception-date-b">實際日期</label>
-                <input id="exception-date-b" type="date" onchange="renderScheduleExceptionPreview()">
-              </div>
-              <div class="form-group">
-                <label for="exception-period-b">節次</label>
-                <select id="exception-period-b" onchange="renderScheduleExceptionPreview()">
-                  <option value="0">早自習</option><option value="1">第 1 節</option><option value="2">第 2 節</option><option value="3">第 3 節</option><option value="4">第 4 節</option>
-                  <option value="5" selected>第 5 節</option><option value="6">第 6 節</option><option value="7">第 7 節</option><option value="8">第 8 節</option>
-                  <option value="45">午休</option>
-                </select>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <div class="exception-preview-heading">影響預覽</div>
-        <div id="exception-preview" class="exception-preview-grid">
-          <div class="exception-preview-empty">填妥兩個日期與節次後，這裡會顯示兩筆反向映射及影響範圍。</div>
-        </div>
-        <div class="flex gap-2 mt-3">
-          <button id="exception-save-btn" class="btn btn-primary" type="button" onclick="saveScheduleException()">➕ 建立對調事件</button>
-          <button class="btn btn-ghost" type="button" onclick="clearScheduleExceptionForm()">清除</button>
-        </div>
-      </div>
-
-      <div class="panel-card">
-        <div class="panel-title">已建立的日期例外</div>
-        <div class="exception-table-scroll">
-          <table class="data-table" id="exception-table">
-            <thead><tr><th>事件</th><th>反向映射</th><th>狀態</th><th>備註</th><th>操作</th></tr></thead>
-            <tbody id="exception-tbody"></tbody>
-          </table>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -1162,7 +1067,7 @@
 <script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.4/dist/pizzip.min.js"></script>
 <script src="https://unpkg.com/file-saver@2.0.5/dist/FileSaver.min.js"></script>
    <script src="word-export.js?v=20260825_v1211_class_subject_phrase_breaks"></script>
-   <script src="app.js?v=20260824_v1208_schedule_exceptions"></script>
-   <script src="app-runtime.js?v=20260824_v1208_schedule_exceptions"></script>
+   <script src="app.js?v=20260826_v1209_schedule_core"></script>
+   <script src="app-runtime.js?v=20260826_v1209_schedule_core"></script>
 </body>
 </html>

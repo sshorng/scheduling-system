@@ -49,6 +49,7 @@ const FIXED_SLOT_NAMES = [
 const WORD_EARLY_PERIOD = 0;
 const WORD_LUNCH_PERIOD = 45;
 const WORD_P8_SPLIT_FONT_SIZE = 24;
+const WORD_TEACHER_P8_SPLIT_FONT_SIZE = 22;
 const WORD_MIN_COURSE_ROW_HEIGHT = 20;
 const WORD_GRADE_NINE_SCIENCE_ROW_HEIGHT = 283;
 
@@ -339,7 +340,7 @@ function wordSetCellGridSpan(cellXml, span) {
   return source.replace(tcPr[0], nextTcPr);
 }
 
-function wordSplitDirectCells(cellXml, key, values, span, totalWidth, valueKeys) {
+function wordSplitDirectCells(cellXml, key, values, span, totalWidth, valueKeys, fontSize = WORD_P8_SPLIT_FONT_SIZE) {
   const sourceWidth = Number.isFinite(Number(totalWidth)) ? Number(totalWidth) : wordCellWidth(cellXml);
   const firstWidth = Math.floor(sourceWidth / 2);
   const secondWidth = sourceWidth - firstWidth;
@@ -348,8 +349,8 @@ function wordSplitDirectCells(cellXml, key, values, span, totalWidth, valueKeys)
     let cell = valueKeys && valueKeys[index]
       ? wordReplacePlaceholders(cellXml, { [key]: valueKeys[index] })
       : wordReplacePlaceholderValue(cellXml, key, value);
-    // 拆欄統一為 12pt，其他字體、字色與範本排版維持不變。
-    cell = wordSetSplitCellFontSize(cell, WORD_P8_SPLIT_FONT_SIZE);
+    // 拆欄只調整呼叫端指定的字級，其他字體、字色與範本排版維持不變。
+    cell = wordSetSplitCellFontSize(cell, fontSize);
     cell = wordSetCellWidth(cell, width);
     return wordSetCellGridSpan(cell, span);
   }).join('');
@@ -489,7 +490,8 @@ function splitTeacherP8Rows(pageXml, teacherCode) {
             values,
             expandedSpan / 2,
             region && region.width,
-            ['d' + day + 'p8_' + suffix + '_single', 'd' + day + 'p8_' + suffix + '_double']
+            ['d' + day + 'p8_' + suffix + '_single', 'd' + day + 'p8_' + suffix + '_double'],
+            WORD_TEACHER_P8_SPLIT_FONT_SIZE
           ));
           cursor += originalSpan;
           return;

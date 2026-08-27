@@ -3429,8 +3429,8 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
          (teacherOutput.match(/<w:tc(?:\s[^>]*)?>[\s\S]*?<\/w:tc>/g) || []).length !== 18 ||
          teacherOutput.includes('<w:insideV') ||
           !teacherOutput.includes('<w:color w:val="BFBFBF"/>') ||
-          !teacherOutput.includes('<w:sz w:val="24"/>') || !teacherOutput.includes('<w:szCs w:val="24"/>')) {
-       throw new Error('教師 Word 第八節未分割單雙週科目與班級儲存格');
+          !teacherOutput.includes('<w:sz w:val="22"/>') || !teacherOutput.includes('<w:szCs w:val="22"/>')) {
+       throw new Error('教師 Word 第八節未分割單雙週科目與班級儲存格並調整為 11pt');
      }
       if (!classFilled.includes('生物輔(單)') || !classFilled.includes('社會輔(雙)') ||
           (classOutput.match(/<w:gridCol/g) || []).length !== 12 ||

@@ -2996,8 +2996,8 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
         throw new Error('教師課表抽離班未逐一顯示綁班班級代碼');
       }
       const teacherDict = context.buildTeacherDict('T01', '115', '1');
-      if (teacherDict.d1p1_s !== '資優英語\nVA / 英語' || teacherDict.d1p1_c !== '701、702、703') {
-        throw new Error('教師 Word 課表未套用抽離班代碼與完整班級列示');
+      if (teacherDict.d1p1_s !== '資優英語\nVA' || teacherDict.d1p1_c !== '701、702、703') {
+        throw new Error('教師 Word 課表未將抽離課程放上方、綁班普通班放下方');
       }
    });
    check('Word multiline placeholder uses valid run breaks', () => {

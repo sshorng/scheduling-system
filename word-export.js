@@ -435,7 +435,7 @@ function teacherP8WeekValues(teacherCode, day, suffix) {
   const cellsForWeek = weekType => teacherP8WeekCells(teacherCode, day, weekType);
   return ['單週', '雙週'].map(weekType => {
     const weekCells = cellsForWeek(weekType);
-    if (suffix === 's') return [...new Set(weekCells.map(cell => teacherWordSubject(cell, teacherCode)).filter(Boolean))].join(' / ');
+    if (suffix === 's') return teacherWordSubjectLabels(weekCells, teacherCode).join(' / ');
     const classInfo = teacherWordClassInfoForCells(weekCells);
     return teacherWordClassLabel(classInfo.codes).text;
   });
@@ -1275,7 +1275,7 @@ function teacherWordSubject(cell, teacherCode) {
 
 function teacherWordSpecialSubject(cells, teacherCode) {
   const grouped = {};
-  (cells || []).forEach(cell => {
+  teacherWordVisibleSubjectCells(cells).forEach(cell => {
     const subject = teacherWordSubject(cell, teacherCode);
     if (!subject) return;
     if (!grouped[subject]) grouped[subject] = new Set();
@@ -1379,6 +1379,29 @@ function wordVirtualBoundClassCodes(cell, subjectCode) {
       if (!wordTeacherIsVirtualClass(classCode)) fallback.add(classCode);
     }));
   return [...fallback];
+}
+
+function teacherWordVisibleSubjectCells(cells) {
+  const source = Array.isArray(cells) ? cells : [];
+  const virtualCells = source.filter(cell => wordTeacherIsVirtualClass(String(cell && cell['班級代碼'] || '').trim()));
+  if (virtualCells.length === 0) return source;
+
+  // 抽離課的綁班普通課程只寫在下方班級列，不要與抽離課程重複寫在上方科目列。
+  const boundClasses = new Set();
+  virtualCells.forEach(cell => {
+    wordVirtualBoundClassCodes(cell, String(cell && cell['科目代碼'] || '').trim())
+      .forEach(classCode => boundClasses.add(classCode));
+  });
+  return source.filter(cell => {
+    const classCode = String(cell && cell['班級代碼'] || '').trim();
+    return wordTeacherIsVirtualClass(classCode) || !boundClasses.has(classCode);
+  });
+}
+
+function teacherWordSubjectLabels(cells, teacherCode) {
+  return [...new Set(teacherWordVisibleSubjectCells(cells)
+    .map(cell => teacherWordSubject(cell, teacherCode))
+    .filter(Boolean))];
 }
 
 function teacherWordClassInfoForCells(cells) {
@@ -2215,7 +2238,7 @@ function buildTeacherDict(teacherCode, yearNum, semNum) {
       const tk = teacherCode + '|' + d + '|' + p;
       const cells = idx.schedByTeacherSlot[tk] || [];
       if (cells.length > 0) {
-        const subLabels = [...new Set(cells.map(c => teacherWordSubject(c, teacherCode)).filter(Boolean))];
+        const subLabels = teacherWordSubjectLabels(cells, teacherCode);
         dict[`d${d}p${p}_s`] = subLabels.join(' / ');
         setClassCellForCells(`d${d}p${p}_c`, cells);
         markPreplanned(`d${d}p${p}_s`, cells);

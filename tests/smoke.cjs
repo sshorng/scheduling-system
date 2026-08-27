@@ -3047,6 +3047,9 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
      if (dict.d1p1_c !== '701') throw new Error('教師 Word 第 1 節未填入班級代碼');
      if (dict.d1p0_c !== '702' || dict.d1p45_c !== '703') throw new Error('教師 Word 特殊節次未填入班級代碼');
       if (dict.d1p8_s !== '國文輔(單)(超)' || dict.d1p8_s_single !== '國文輔(單)(超)' || dict.d1p8_c !== '704') throw new Error('第八節課輔或超鐘點標記未保留在教師課表格子');
+      if (dict['日期'] !== '(日期)' || !context.fillPlaceholders('<w:p><w:r><w:t>{日期}</w:t></w:r></w:p>', { '日期': dict['日期'] }).includes('(日期)')) throw new Error('教師 Word 範本日期標記未保留');
+      const templateHeader = context.buildTeacherPageXml({ bodyInner: '<w:p><w:r><w:t>{姓名}教師(日期)</w:t></w:r></w:p>' }, 'T01', '114', '1', false);
+      if (!templateHeader.includes('教師一教師(日期)')) throw new Error('教師 Word 範本日期文字未直接替換');
       if (dict.d2p1_c !== '802、803、805、806' || dict.__classFontSizes.d2p1_c !== 18) throw new Error('教師 Word 四班班級列未逐一顯示或未套用 9pt 字體');
      if (context.teacherWordSubject({ '科目代碼': '公民', '節次': '8', '課堂屬性': '單週' }) !== '公民(單)' ||
          context.teacherWordSubject({ '科目代碼': '公民', '節次': '8', '課堂屬性': '雙週' }) !== '公民(雙)') {
@@ -3258,7 +3261,7 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
    }
    if (!runtime.includes('matrixAssignmentAttribute') || !runtime.includes("isPreplannedCourse(assignment['課程屬性'])")) throw new Error('配課預排屬性未接入前端');
    if (!runtime.includes('isPreplannedScheduleEntry(cell)')) throw new Error('預排課程未排除教師鐘點');
-   if (!wordExport.includes("applyWordPlaceholderFontColors(page, preplannedKeys, '7F7F7F')")) throw new Error('Word 預排灰字未接入');
+    if (wordExport.includes('wordEnsureP8TemplateFontColors(page)') || wordExport.includes("applyWordPlaceholderFontColors(page, preplannedKeys, '7F7F7F')")) throw new Error('Word 匯出仍覆寫範本預設字色');
  });
     check('Class Word timetable includes regular period eight courses', () => {
     const start = wordExport.indexOf('function slotSubject(classCode, day, period)');
@@ -3384,7 +3387,7 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
     };
     vm.createContext(context);
     vm.runInContext(wordExport, context, { filename: 'word-p8-split.js' });
-    const cell = token => '<w:tc><w:tcPr><w:tcW w:w="1200" w:type="dxa"/></w:tcPr><w:p><w:r><w:rPr></w:rPr><w:t>' + token + '</w:t></w:r></w:p></w:tc>';
+     const cell = token => '<w:tc><w:tcPr><w:tcW w:w="1200" w:type="dxa"/></w:tcPr><w:p><w:r><w:rPr><w:color w:val="BFBFBF"/></w:rPr><w:t>' + token + '</w:t></w:r></w:p></w:tc>';
     const teacherRow = (token, marker) => '<w:tr>' + cell(marker) + cell(marker) + cell(marker) +
       [1, 2, 3, 4, 5].map(day => cell(token.replace('1', String(day)))).join('') + '</w:tr>';
     const classRow = token => '<w:tr>' + cell('a') + cell('a') +
@@ -3398,21 +3401,23 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
         d1p8_s_single: '公民(單)', d1p8_s_double: '公民(雙)',
        d1p8_c_single: '906', d1p8_c_double: '904'
      });
-     const classFilled = context.fillPlaceholders(classOutput, {
-        d1p8s: '生物輔(單)', d1p8d: '社會輔(雙)'
-     });
+      const classFilled = context.fillPlaceholders(classOutput, {
+         d1p8s: '生物輔(單)', d1p8d: '社會輔(雙)'
+      });
       if (!teacherFilled.includes('公民(單)') || !teacherFilled.includes('公民(雙)') ||
          !teacherFilled.includes('906') || !teacherFilled.includes('904') ||
          (teacherOutput.match(/<w:gridCol/g) || []).length !== 13 ||
          (teacherOutput.match(/<w:tc(?:\s[^>]*)?>[\s\S]*?<\/w:tc>/g) || []).length !== 18 ||
          teacherOutput.includes('<w:insideV') ||
-         !teacherOutput.includes('<w:sz w:val="20"/>') || !teacherOutput.includes('<w:szCs w:val="20"/>')) {
+          !teacherOutput.includes('<w:color w:val="BFBFBF"/>') ||
+          !teacherOutput.includes('<w:sz w:val="24"/>') || !teacherOutput.includes('<w:szCs w:val="24"/>')) {
        throw new Error('教師 Word 第八節未分割單雙週科目與班級儲存格');
      }
       if (!classFilled.includes('生物輔(單)') || !classFilled.includes('社會輔(雙)') ||
           (classOutput.match(/<w:gridCol/g) || []).length !== 12 ||
          (classOutput.match(/<w:tc(?:\s[^>]*)?>[\s\S]*?<\/w:tc>/g) || []).length !== 12 ||
-        classOutput.includes('<w:insideV') || !classOutput.includes('<w:sz w:val="20"/>')) {
+         classOutput.includes('<w:insideV') || !classOutput.includes('<w:color w:val="BFBFBF"/>') ||
+         !classOutput.includes('<w:sz w:val="24"/>') || !classOutput.includes('<w:szCs w:val="24"/>')) {
        throw new Error('班級 Word 第八節未分割單雙週儲存格');
        }
         const normalizedP8Row = context.wordRows(classOutput).find(row => row.includes('d1p8s'));

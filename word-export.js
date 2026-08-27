@@ -48,7 +48,7 @@ const FIXED_SLOT_NAMES = [
 
 const WORD_EARLY_PERIOD = 0;
 const WORD_LUNCH_PERIOD = 45;
-const WORD_P8_SPLIT_FONT_SIZE = 20;
+const WORD_P8_SPLIT_FONT_SIZE = 24;
 const WORD_MIN_COURSE_ROW_HEIGHT = 20;
 
 function wordRowText(xml) {
@@ -231,9 +231,14 @@ function wordSetPlaceholderFontColor(xml, key, color) {
   });
 }
 
+function isWordP8PlaceholderKey(key) {
+  return /^d[1-5]p8(?:s|d|_[sc](?:_(?:single|double))?)?$/.test(String(key || ''));
+}
+
 function applyWordPlaceholderFontColors(pageXml, keys, color) {
   let output = String(pageXml || '');
-  [...new Set(keys || [])].forEach(key => {
+  // 第八節字體顏色由 Word 範本決定，不在套版階段覆寫。
+  [...new Set(keys || [])].filter(key => !isWordP8PlaceholderKey(key)).forEach(key => {
     output = wordSetPlaceholderFontColor(output, key, color);
   });
   return output;
@@ -242,6 +247,7 @@ function applyWordPlaceholderFontColors(pageXml, keys, color) {
 function applyTeacherClassFontSizes(pageXml, sizes) {
   let output = String(pageXml || '');
   Object.entries(sizes || {}).forEach(([key, halfPoints]) => {
+    if (isWordP8PlaceholderKey(key)) return;
     const keys = [key];
     if (/_c$/.test(key)) keys.push(key + '_single', key + '_double');
     keys.forEach(item => {
@@ -341,6 +347,7 @@ function wordSplitDirectCells(cellXml, key, values, span, totalWidth, valueKeys)
     let cell = valueKeys && valueKeys[index]
       ? wordReplacePlaceholders(cellXml, { [key]: valueKeys[index] })
       : wordReplacePlaceholderValue(cellXml, key, value);
+    // 拆欄統一為 12pt，其他字體、字色與範本排版維持不變。
     cell = wordSetSplitCellFontSize(cell, WORD_P8_SPLIT_FONT_SIZE);
     cell = wordSetCellWidth(cell, width);
     return wordSetCellGridSpan(cell, span);
@@ -1164,8 +1171,11 @@ function wordMergeCourseRows(rows, tokenNames, combineContent, preferredToken) {
   });
 }
 
-function wordSetCourseSummaryMinimumRows(rows) {
+function wordSetCourseSummaryMinimumRows(rows, options = {}) {
+  const preserveGradeNineScienceRows = options.preserveGradeNineScienceRows === true;
   (rows || []).forEach((row, index) => {
+    const text = wordRowText(row);
+    if (preserveGradeNineScienceRows && (text.includes('自然科學') || text.includes('{生物名}') || text.includes('理化') || text.includes('地球科學'))) return;
     if (/\{[^{}]*節\}/.test(row)) rows[index] = wordSetRowHeight(row, WORD_MIN_COURSE_ROW_HEIGHT);
   });
 }
@@ -1177,7 +1187,7 @@ function wordEnsureCourseSummaryMinimumRows(pageXml, options = {}) {
     if (!tableText.includes('領域') || !tableText.includes('科目') || !tableText.includes('授課老師')) return tableXml;
     const rows = wordRows(tableXml).map(row => {
       const text = wordRowText(row);
-      if (preserveGradeNineScienceRows && (text.includes('理化') || text.includes('地球科學'))) {
+      if (preserveGradeNineScienceRows && (text.includes('自然科學') || text.includes('{生物名}') || text.includes('理化') || text.includes('地球科學'))) {
         return wordRemoveRowHeight(row);
       }
       return wordSetRowHeight(row, WORD_MIN_COURSE_ROW_HEIGHT);
@@ -1198,7 +1208,7 @@ function applyClassCourseTemplateRules(pageXml, classCode, hasNativeLanguage, mu
       wordMergeCourseRows(rows, ['英語', '本土語'], false);
     }
     if (musicClass) wordMergeCourseRows(rows, ['音樂', '視覺藝術', '表演藝術'], true, musicSubject);
-    wordSetCourseSummaryMinimumRows(rows);
+    wordSetCourseSummaryMinimumRows(rows, { preserveGradeNineScienceRows: isWordGradeNineClass(classCode) });
     let rowIndex = 0;
     return tableXml.replace(/<w:tr(?:\s[^>]*)?>[\s\S]*?<\/w:tr>/g, () => rows[rowIndex++] || '');
   });
@@ -1609,6 +1619,7 @@ function buildClassDict(classCode, yearNum, semNum) {
     '期': semNum,
     '班級名稱': className,
     '導師': homeTeacher,
+    '日期': '(日期)',
     '雙語課堂數': wordClassBilingualLessonCount(classCode, info),
     '__hasNativeLanguage': hasWordCourseData(courses, '本土語', classCode),
     '__musicSubject': wordMusicCourseSubject(courses, classCode),
@@ -1616,31 +1627,20 @@ function buildClassDict(classCode, yearNum, semNum) {
       ? wordGradeNineNaturalScienceValues(courses)
       : null
   };
-  const preplannedKeys = [];
-  const markPreplanned = (key, cell) => {
-    if (isWordPreplannedCell(cell)) preplannedKeys.push(key);
-  };
-
   for (let d = 1; d <= 5; d++) {
     const earlyKey = 'd' + d + 'p0';
     const earlyCell = classWordScheduleCell(classCode, d, WORD_EARLY_PERIOD);
     dict[earlyKey] = slotSubject(classCode, d, WORD_EARLY_PERIOD);
-    markPreplanned(earlyKey, earlyCell);
     for (let p = 1; p <= 7; p++) {
       const key = 'd' + d + 'p' + p;
       dict[key] = slotSubject(classCode, d, p);
-      markPreplanned(key, classWordScheduleCell(classCode, d, p));
     }
     const lunchKey = 'd' + d + 'p45';
     dict[lunchKey] = slotSubject(classCode, d, WORD_LUNCH_PERIOD);
-    markPreplanned(lunchKey, classWordScheduleCell(classCode, d, WORD_LUNCH_PERIOD));
     // 第八節：單／雙雙欄 + 合併向後相容
     dict['d' + d + 'p8']    = slotSubject(classCode, d, 8);
     dict['d' + d + 'p8s']   = slotSubjectP8(classCode, d, '單週');
     dict['d' + d + 'p8d']   = slotSubjectP8(classCode, d, '雙週');
-    markPreplanned('d' + d + 'p8', classWordScheduleCell(classCode, d, 8));
-    markPreplanned('d' + d + 'p8s', classWordScheduleCell(classCode, d, 8, '單週'));
-    markPreplanned('d' + d + 'p8d', classWordScheduleCell(classCode, d, 8, '雙週'));
   }
 
   // 課表配色：依每格科目＋班級解析底色（班級課表）
@@ -1662,7 +1662,6 @@ function buildClassDict(classCode, yearNum, semNum) {
     if (fd) fills['d' + d + 'p8d'] = fd;
   }
   dict.__fills = fills;
-  dict.__preplannedKeys = preplannedKeys;
 
   FIXED_SLOT_NAMES.forEach(name => {
     let data = findCourseFuzzy(courses, name);
@@ -1853,12 +1852,10 @@ function buildClassPageXml(tpl, classCode, yearNum, semNum, leadPageBreak) {
   const flexCount = dict.__flexCount || 0;
   delete dict.__flexCount;
   const fills = dict.__fills || null;
-  const preplannedKeys = dict.__preplannedKeys || [];
   const hasNativeLanguage = dict.__hasNativeLanguage === true;
   const musicSubject = String(dict.__musicSubject || '').trim();
   const gradeNineNaturalScience = dict.__gradeNineNaturalScience || null;
   delete dict.__fills;
-  delete dict.__preplannedKeys;
   delete dict.__hasNativeLanguage;
   delete dict.__musicSubject;
   delete dict.__gradeNineNaturalScience;
@@ -1866,7 +1863,6 @@ function buildClassPageXml(tpl, classCode, yearNum, semNum, leadPageBreak) {
   page = splitClassP8Row(page, classCode);
   page = applyClassCourseTemplateRules(page, classCode, hasNativeLanguage, musicSubject);
   page = splitGradeNineNaturalScienceRow(page, classCode, gradeNineNaturalScience);
-  page = applyWordPlaceholderFontColors(page, preplannedKeys, '7F7F7F');
   page = fills ? injectCellFills(page, fills) : page;
   page = fillPlaceholders(page, dict);
   if (isWordMusicClass(classCode)) page = renameWordMusicClassFlexLabel(page);
@@ -2171,6 +2167,7 @@ function buildTeacherDict(teacherCode, yearNum, semNum) {
     '年': yearNum,
     '期': semNum === '1' ? '一' : (semNum === '2' ? '二' : semNum),
     '姓名': name,
+    '日期': '(日期)',
     '減授原因': String(tInfo['減授原因'] || '').trim(),
     '超鐘點': calculateTeacherOvertime(teacherCode, tInfo)
   };
@@ -2297,19 +2294,10 @@ function buildTeacherDict(teacherCode, yearNum, semNum) {
 
 function buildTeacherPageXml(tpl, teacherCode, yearNum, semNum, leadPageBreak) {
   const dict = buildTeacherDict(teacherCode, yearNum, semNum);
-  const fills = dict.__fills || null;
-  const classFontSizes = dict.__classFontSizes || null;
-  const preplannedKeys = dict.__preplannedKeys || [];
-  delete dict.__fills;
-  delete dict.__classFontSizes;
-  delete dict.__preplannedKeys;
   let page = expandWordSpecialRows(tpl.bodyInner, dict, 'teacher');
   page = splitTeacherP8Rows(page, teacherCode);
-  page = applyWordPlaceholderFontColors(page, preplannedKeys, '7F7F7F');
-  page = classFontSizes ? applyTeacherClassFontSizes(page, classFontSizes) : page;
-  page = fills ? injectCellFills(page, fills) : page;
+  // 除了第八節必要的單／雙週拆欄，其餘內容只直接替換範本文字。
   page = fillPlaceholders(page, dict);
-  page = wordLockTableColumns(page);
   if (leadPageBreak) page = injectPageBreakAtStart(page);
   return page;
 }

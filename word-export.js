@@ -2310,10 +2310,16 @@ function buildTeacherDict(teacherCode, yearNum, semNum) {
 
 function buildTeacherPageXml(tpl, teacherCode, yearNum, semNum, leadPageBreak) {
   const dict = buildTeacherDict(teacherCode, yearNum, semNum);
+  const fills = dict.__fills || null;
+  const classFontSizes = dict.__classFontSizes || null;
+  delete dict.__fills;
+  delete dict.__classFontSizes;
   let page = expandWordSpecialRows(tpl.bodyInner, dict, 'teacher');
   page = splitTeacherP8Rows(page, teacherCode);
-  // 除了第八節必要的單／雙週拆欄，其餘內容只直接替換範本文字。
+  page = classFontSizes ? applyTeacherClassFontSizes(page, classFontSizes) : page;
+  page = fills ? injectCellFills(page, fills) : page;
   page = fillPlaceholders(page, dict);
+  page = wordLockTableColumns(page);
   if (leadPageBreak) page = injectPageBreakAtStart(page);
   return page;
 }

@@ -3031,6 +3031,11 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
             { '班級代碼': '805', '科目代碼': '國文', '教師姓名': 'T01' },
             { '班級代碼': '806', '科目代碼': '國文', '教師姓名': 'T01' }
           ],
+          'T01|3|1': [
+            { '班級代碼': '802', '科目代碼': '國文', '教師姓名': 'T01' },
+            { '班級代碼': '803', '科目代碼': '國文', '教師姓名': 'T01' },
+            { '班級代碼': '805', '科目代碼': '國文', '教師姓名': 'T01' }
+          ],
           'T01|1|8': [{ '班級代碼': '704', '節次': '8', '科目代碼': '國文輔', '課堂屬性': '單週', '教師姓名': '[{"教師姓名":"T01","超鐘點":true}]' }]
        }
      },
@@ -3056,6 +3061,20 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
       throw new Error('教師 Word 第八節單雙週標籤格式錯誤');
     }
     if (dict.__fills.d1p1_s !== 'FBE4D5' || dict.__fills.d1p1_c !== 'FBE4D5') throw new Error('教師 Word 科目與班級欄位底色未同步');
+    const stylePage = context.buildTeacherPageXml({ bodyInner:
+      '<w:tbl><w:tblGrid><w:gridCol w:w="1000"/><w:gridCol w:w="1000"/><w:gridCol w:w="1000"/></w:tblGrid>' +
+      '<w:tr>' +
+      '<w:tc><w:tcPr></w:tcPr><w:p><w:r><w:rPr></w:rPr><w:t>{d1p1_s}</w:t></w:r></w:p></w:tc>' +
+      '<w:tc><w:tcPr></w:tcPr><w:p><w:r><w:rPr></w:rPr><w:t>{d3p1_c}</w:t></w:r></w:p></w:tc>' +
+      '<w:tc><w:tcPr></w:tcPr><w:p><w:r><w:rPr></w:rPr><w:t>{d2p1_c}</w:t></w:r></w:p></w:tc>' +
+      '</w:tr></w:tbl>'
+    }, 'T01', '114', '1', false);
+    if ((stylePage.match(/<w:shd\b[^>]*w:fill="FBE4D5"/g) || []).length !== 1 ||
+        !stylePage.includes('802、803、805') || !stylePage.includes('802、803、805、806') ||
+        !stylePage.includes('<w:sz w:val="20"/>') || !stylePage.includes('<w:sz w:val="18"/>') ||
+        !stylePage.includes('<w:szCs w:val="20"/>') || !stylePage.includes('<w:szCs w:val="18"/>')) {
+      throw new Error('教師 Word 匯出未套用表格配色或三班／四班字級');
+    }
    });
    check('Teacher Word compact multi-class labels and virtual class names', () => {
     const context = {

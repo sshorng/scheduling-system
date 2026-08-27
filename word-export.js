@@ -50,6 +50,7 @@ const WORD_EARLY_PERIOD = 0;
 const WORD_LUNCH_PERIOD = 45;
 const WORD_P8_SPLIT_FONT_SIZE = 24;
 const WORD_MIN_COURSE_ROW_HEIGHT = 20;
+const WORD_GRADE_NINE_SCIENCE_ROW_HEIGHT = 283;
 
 function wordRowText(xml) {
   return String(xml || '')
@@ -1045,9 +1046,10 @@ function wordRowHeightValue(rowXml) {
   return Math.max(1, parseInt(match?.[1] || '323', 10));
 }
 
-function wordSetRowHeight(rowXml, height) {
+function wordSetRowHeight(rowXml, height, rule = 'atLeast') {
   const value = Math.max(1, Math.round(Number(height) || 1));
-  const heightTag = '<w:trHeight w:val="' + value + '" w:hRule="atLeast"/>';
+  const heightRule = rule === 'exact' ? 'exact' : 'atLeast';
+  const heightTag = '<w:trHeight w:val="' + value + '" w:hRule="' + heightRule + '"/>';
   let output = String(rowXml || '');
   if (/<w:trHeight\b[^>]*\/>/.test(output)) return output.replace(/<w:trHeight\b[^>]*\/>/, heightTag);
   if (/<w:trHeight\b[^>]*>[\s\S]*?<\/w:trHeight>/.test(output)) {
@@ -1099,9 +1101,9 @@ function splitGradeNineNaturalScienceRow(pageXml, classCode, values) {
       return wordSetVerticalMerge(wordClearCourseCell(cell), 'continue');
     });
 
-    // 自然科學拆列不設定列高，讓 Word 依理化與地球科學內容自動撐高。
-    const topRow = wordRemoveRowHeight(wordRebuildRow(sourceRow, topCells));
-    const bottomRow = wordRemoveRowHeight(wordRebuildRow(sourceRow, bottomCells));
+    // 理化與地球科學列固定為 0.5 公分，避免 Word 依內容把列撐大。
+    const topRow = wordSetRowHeight(wordRebuildRow(sourceRow, topCells), WORD_GRADE_NINE_SCIENCE_ROW_HEIGHT, 'exact');
+    const bottomRow = wordSetRowHeight(wordRebuildRow(sourceRow, bottomCells), WORD_GRADE_NINE_SCIENCE_ROW_HEIGHT, 'exact');
     return tableXml.replace(sourceRow, topRow + bottomRow);
   });
 }
@@ -1188,12 +1190,25 @@ function wordEnsureCourseSummaryMinimumRows(pageXml, options = {}) {
     const rows = wordRows(tableXml).map(row => {
       const text = wordRowText(row);
       if (preserveGradeNineScienceRows && (text.includes('自然科學') || text.includes('{生物名}') || text.includes('理化') || text.includes('地球科學'))) {
-        return wordRemoveRowHeight(row);
+        return wordSetRowHeight(row, WORD_GRADE_NINE_SCIENCE_ROW_HEIGHT, 'exact');
       }
       return wordSetRowHeight(row, WORD_MIN_COURSE_ROW_HEIGHT);
     });
     let rowIndex = 0;
     return tableXml.replace(/<w:tr(?:\s[^>]*)?>[\s\S]*?<\/w:tr>/g, () => rows[rowIndex++] || '');
+  });
+}
+
+function wordSetGradeNineScienceRowHeights(pageXml, classCode) {
+  if (!isWordGradeNineClass(classCode)) return pageXml;
+  return String(pageXml || '').replace(/<w:tbl(?:\s[^>]*)?>[\s\S]*?<\/w:tbl>/g, tableXml => {
+    if (!tableXml.includes('理化') && !tableXml.includes('地球科學')) return tableXml;
+    return tableXml.replace(/<w:tr(?:\s[^>]*)?>[\s\S]*?<\/w:tr>/g, row => {
+      const text = wordRowText(row);
+      return text.includes('理化') || text.includes('地球科學')
+        ? wordSetRowHeight(row, WORD_GRADE_NINE_SCIENCE_ROW_HEIGHT, 'exact')
+        : row;
+    });
   });
 }
 
@@ -1870,6 +1885,7 @@ function buildClassPageXml(tpl, classCode, yearNum, semNum, leadPageBreak) {
   page = wordEnsureCourseSummaryMinimumRows(page, {
     preserveGradeNineScienceRows: Boolean(gradeNineNaturalScience)
   });
+  page = wordSetGradeNineScienceRowHeights(page, classCode);
   if (leadPageBreak) page = injectPageBreakAtStart(page);
   return page;
 }

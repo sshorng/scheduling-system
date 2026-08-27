@@ -3143,8 +3143,8 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
     if (!/<w:vMerge\s+w:val="restart"\s*\/>/.test(topCells[4]) || !/<w:vMerge\s*\/>/.test(bottomCells[4])) {
       throw new Error('自然科學領域欄未跨兩列合併');
     }
-    if (rows.slice(1).some(row => /<w:trHeight\b/.test(row))) {
-      throw new Error('九年級自然科學拆列仍設定列高');
+    if (rows.slice(1).some(row => !row.includes('<w:trHeight w:val="283" w:hRule="exact"/>'))) {
+      throw new Error('九年級自然科學拆列未固定為 0.5 公分');
     }
   });
   check('Grade-nine class Word build keeps timetable above split science summary', () => {
@@ -3210,8 +3210,8 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
       throw new Error('九年級班級 Word 輸出未保留上方課表或未產生兩列自然科學');
     }
     const nonScienceRows = summaryRows.filter(item => !scienceRows.includes(item));
-    if (nonScienceRows.some(item => context.wordRowHeightValue(item) !== 20) || scienceRows.some(item => /<w:trHeight\b/.test(item)) || scienceRows.some(item => item.includes('<w:tbl>'))) {
-      throw new Error('九年級自然科學未移除列高或其他摘要列高度錯誤');
+    if (nonScienceRows.some(item => context.wordRowHeightValue(item) !== 20) || scienceRows.some(item => !item.includes('<w:trHeight w:val="283" w:hRule="exact"/>')) || scienceRows.some(item => item.includes('<w:tbl>'))) {
+      throw new Error('九年級自然科學未固定為 0.5 公分或其他摘要列高度錯誤');
     }
     if (!scienceRows[0].includes('理化') || !scienceRows[0].includes('>2<') || !scienceRows[0].includes('自然教師') || !scienceRows[1].includes('地球科學') || !scienceRows[1].includes('>1<') || scienceRows[1].includes('自然教師') || scienceRows[1].includes('地科教師')) {
       throw new Error('九年級班級 Word 輸出自然科學科目或節數錯誤');

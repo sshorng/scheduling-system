@@ -385,10 +385,14 @@ async function main() {
     const result = await runAndReport('assignment-groups', data);
     const rows = result.schedule.filter(entry => String(entry['班級代碼']) === '701' && String(entry['科目代碼']) === '英語');
     assertSame(rows.length, 6, '不同備註配課不應被合併後套用同一個每日分散限制');
-    assertSame(rows.filter(entry => String(entry['教師姓名']) === 'T1').length, 3, 'A組配課未完整排入');
-    assertSame(rows.filter(entry => String(entry['教師姓名']) === 'T2').length, 3, 'B組配課未完整排入');
-    const slots = rows.map(entry => String(entry['星期']) + '-' + String(entry['節次']) + '-' + String(entry['課堂屬性'] || '全週'));
-    if (new Set(slots).size !== rows.length) throw new Error('同班同科不同組被排入同一時段');
+     assertSame(rows.filter(entry => String(entry['教師姓名']) === 'T1').length, 3, 'A組配課未完整排入');
+     assertSame(rows.filter(entry => String(entry['教師姓名']) === 'T2').length, 3, 'B組配課未完整排入');
+     const slots = rows.map(entry => String(entry['星期']) + '-' + String(entry['節次']) + '-' + String(entry['課堂屬性'] || '全週'));
+     const slotsByTeacher = new Map(['T1', 'T2'].map(teacher => [teacher, new Set(rows
+       .filter(entry => String(entry['教師姓名']) === teacher)
+       .map(entry => String(entry['星期']) + '-' + String(entry['節次']) + '-' + String(entry['課堂屬性'] || '全週')))]));
+     const sharedSlots = [...slotsByTeacher.get('T1')].filter(slot => slotsByTeacher.get('T2').has(slot));
+     if (sharedSlots.length === 0) throw new Error('不同教師的分組未共用同一時段');
     const internalGroupKeys = new Set(rows.map(entry => String(entry.__assignmentGroupKey || '')));
     if (!internalGroupKeys.has('701|英語|A組') || !internalGroupKeys.has('701|英語|B組')) throw new Error('自動排課課表 entry 未保留正確分組識別');
     if (Object.keys(rows[0]).includes('__assignmentGroupKey')) throw new Error('分組識別不應污染課表資料 schema');

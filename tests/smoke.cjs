@@ -963,7 +963,36 @@ check('Single and double week slots only conflict within the same week', () => {
      day: 1, period: 8, classCode: 'C1', subjectCode: 'S2', teacherCode: 'T2', attr: '雙週'
    }, '', preloaded);
    if (oppositeWeekClass.some(item => item.kind === 'classPeriodEight')) throw new Error('雙週錯誤擋下同班單週課程');
-  const coTeacher = context.checkConflicts_(null, {
+   const groupedAssignments = [
+     { '配課ID': 'GROUP-A', '班級代碼': 'C1', '科目代碼': 'S2', '教師姓名': 'T1', '備註': 'A組' },
+     { '配課ID': 'GROUP-B', '班級代碼': 'C1', '科目代碼': 'S2', '教師姓名': 'T2', '備註': 'B組' }
+   ];
+   const groupedData = {
+     ...preloaded,
+     assignments: groupedAssignments,
+     schedule: [{
+       '課表ID': 'GROUP-ROW-A', '班級代碼': 'C1', '星期': '1', '節次': '8',
+       '科目代碼': 'S2', '教師姓名': 'T1', '課堂屬性': '單週'
+     }]
+   };
+   const groupedConflict = context.checkConflicts_(null, {
+     day: 1, period: 8, classCode: 'C1', subjectCode: 'S2', teacherCode: 'T2',
+     attr: '單週', assignmentNote: 'B組'
+   }, '', groupedData);
+   if (groupedConflict.some(item => item.kind === 'classPeriodEight')) throw new Error('不同教師的不同備註分組未允許同格');
+   const groupedSnapshot = context.validateScheduleSnapshot_([
+     groupedData.schedule[0], {
+       '課表ID': 'GROUP-ROW-B', '班級代碼': 'C1', '星期': '1', '節次': '8',
+       '科目代碼': 'S2', '教師姓名': 'T2', '課堂屬性': '單週'
+     }
+   ], {
+     classes: preloaded.classes,
+     teachers: [{ '教師姓名': 'T1', '最大連堂節數': '2' }, { '教師姓名': 'T2', '最大連堂節數': '2' }],
+     assignments: groupedAssignments, subjects: preloaded.subjects, teacherBlocks: [], subjectRules: [],
+     blockGroups: [], teacherExclusives: [], rooms: []
+   });
+   if (!groupedSnapshot.ok) throw new Error('不同教師的不同備註分組未通過同格快照稽核：' + groupedSnapshot.error);
+   const coTeacher = context.checkConflicts_(null, {
     day: 1, period: 1, classCode: 'C2', subjectCode: 'S2',
     teacherCode: JSON.stringify([{ '教師姓名': 'T1' }, { '教師姓名': 'T2' }]),
     allowCoTeacherOverlap: true

@@ -183,6 +183,11 @@
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .palette-card > .cell-chip { max-width: 120px; }
+    .palette-card > .palette-note {
+      max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      padding: 1px 5px; border-radius: 8px; background: var(--accent-light); color: var(--accent-dark);
+      font-size: 10px; font-weight: 700;
+    }
     .palette-card > .badge-count { max-width: 140px; }
 
     .tt-card {
@@ -1576,6 +1581,56 @@
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.asgn-matrix-assignment-row {
+  display: block;
+  width: 100%;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.asgn-matrix-assignment-row:hover,
+.asgn-matrix-assignment-row:focus-visible {
+  background: rgba(255, 255, 255, .75);
+  outline: 1px solid var(--accent);
+}
+.asgn-matrix-assignment-row + .asgn-matrix-assignment-row {
+  margin-top: 3px;
+  border-top: 1px dashed rgba(20, 83, 45, .25);
+  border-radius: 0 0 5px 5px;
+}
+.asgn-matrix-group,
+.asgn-matrix-assignment-weekly {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.asgn-matrix-group {
+  color: var(--accent-dark);
+}
+.asgn-matrix-add-group {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 2px 4px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 10px;
+  cursor: pointer;
+}
+.asgn-matrix-add-group:hover,
+.asgn-matrix-add-group:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+  outline: none;
 }
 .assignment-matrix-table .asgn-matrix-cell.is-preplanned {
   opacity: .68;

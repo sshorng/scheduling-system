@@ -39,6 +39,102 @@ function getAssignmentWeeklyValue(assignment, subject = null, fallback = 3) {
   return getSubjectWeeklyValue(subject || idx?.subjectByCode?.[String(assignment?.['科目代碼'] || '').trim()], fallback);
 }
 
+// 同班同科可有多筆配課；備註是目前不新增欄位時的分組識別。
+function getAssignmentGroupKey(assignment) {
+  if (!assignment) return '';
+  return String(assignment['班級代碼'] || '').trim() + '|' +
+    String(assignment['科目代碼'] || '').trim() + '|' +
+    String(assignment['備註'] || '').trim();
+}
+
+function getAssignmentGroupLabel(assignment) {
+  return String(assignment?.['備註'] || '').trim();
+}
+
+function getAssignmentTeacherSignature(assignment) {
+  return [...new Set(getCellTeacherCodes(assignment))].map(code => String(code || '').trim())
+    .filter(Boolean).sort().join('|');
+}
+
+function assignmentTeacherSetsMatch(left, right) {
+  const leftCodes = getAssignmentTeacherSignature(left).split('|').filter(Boolean);
+  const rightCodes = getAssignmentTeacherSignature(right).split('|').filter(Boolean);
+  return leftCodes.length === rightCodes.length && leftCodes.every(code => rightCodes.includes(code));
+}
+
+function scheduleEntryMatchesAssignment(entry, assignment) {
+  if (!entry || !assignment) return false;
+  if (String(entry['班級代碼'] || '').trim() !== String(assignment['班級代碼'] || '').trim()) return false;
+  if (String(entry['科目代碼'] || '').trim() !== String(assignment['科目代碼'] || '').trim()) return false;
+  return assignmentTeacherSetsMatch(entry, assignment);
+}
+
+function getAssignmentGroupKeysForScheduleEntry(entry, assignments = state.assignments) {
+  const explicitGroupKey = String(entry?.__assignmentGroupKey || '').trim();
+  if (explicitGroupKey) return [explicitGroupKey];
+  const classCode = String(entry?.['班級代碼'] || '').trim();
+  const subjectCode = String(entry?.['科目代碼'] || '').trim();
+  if (!classCode || !subjectCode) return [];
+  const candidates = (Array.isArray(assignments) ? assignments : []).filter(assignment =>
+    String(assignment['班級代碼'] || '').trim() === classCode &&
+    String(assignment['科目代碼'] || '').trim() === subjectCode
+  );
+  const exact = candidates.filter(assignment => scheduleEntryMatchesAssignment(entry, assignment));
+  if (exact.length > 0) return [...new Set(exact.map(getAssignmentGroupKey).filter(Boolean))];
+  return candidates.length === 1 ? [getAssignmentGroupKey(candidates[0])] : [];
+}
+
+function buildAutoScheduleEntriesByAssignmentGroup(schedule, assignments) {
+  const index = new Map();
+  (Array.isArray(assignments) ? assignments : []).forEach(assignment => {
+    const key = getAssignmentGroupKey(assignment);
+    if (key && !index.has(key)) index.set(key, []);
+  });
+  (Array.isArray(schedule) ? schedule : []).forEach(entry => {
+    getAssignmentGroupKeysForScheduleEntry(entry, assignments).forEach(key => index.get(key)?.push(entry));
+  });
+  return index;
+}
+
+function getAssignmentGroupConflict(candidate, assignments = state.assignments) {
+  const signature = getAssignmentTeacherSignature(candidate);
+  if (!signature) return null;
+  const candidateClass = String(candidate?.['班級代碼'] || '').trim();
+  const candidateSubject = String(candidate?.['科目代碼'] || '').trim();
+  const candidateNote = String(candidate?.['備註'] || '').trim();
+  const candidateId = String(candidate?.['配課ID'] || '').trim();
+  return (Array.isArray(assignments) ? assignments : []).find(assignment =>
+    String(assignment['配課ID'] || '').trim() !== candidateId &&
+    String(assignment['班級代碼'] || '').trim() === candidateClass &&
+    String(assignment['科目代碼'] || '').trim() === candidateSubject &&
+    String(assignment['備註'] || '').trim() !== candidateNote &&
+    getAssignmentTeacherSignature(assignment) === signature
+  ) || null;
+}
+
+function getAssignmentGroupWarnings(assignments = state.assignments) {
+  const warnings = [];
+  const seen = new Set();
+  const grouped = new Map();
+  (Array.isArray(assignments) ? assignments : []).forEach(assignment => {
+    const classCode = String(assignment['班級代碼'] || '').trim();
+    const subjectCode = String(assignment['科目代碼'] || '').trim();
+    const note = String(assignment['備註'] || '').trim();
+    const signature = getAssignmentTeacherSignature(assignment);
+    if (!classCode || !subjectCode || !note || !signature) return;
+    const key = classCode + '|' + subjectCode + '|' + signature;
+    if (!grouped.has(key)) grouped.set(key, new Set());
+    grouped.get(key).add(note);
+  });
+  grouped.forEach((notes, key) => {
+    if (notes.size < 2 || seen.has(key)) return;
+    seen.add(key);
+    const [classCode, subjectCode, ...signature] = key.split('|');
+    warnings.push('同班同科不同備註使用相同教師集合：' + classCode + '／' + subjectCode + '（' + [...notes].join('、') + '；教師 ' + signature.join('、') + '）');
+  });
+  return warnings;
+}
+
 function isPreplannedCourse(value) {
   return String(value || '').trim() === '預排';
 }
@@ -51,7 +147,8 @@ function isPreplannedScheduleEntry(entry) {
   return (state.assignments || []).some(assignment =>
     String(assignment['班級代碼'] || '').trim() === classCode &&
     String(assignment['科目代碼'] || '').trim() === subjectCode &&
-    isPreplannedCourse(assignment['課程屬性'])
+    isPreplannedCourse(assignment['課程屬性']) &&
+    scheduleEntryMatchesAssignment(entry, assignment)
   );
 }
 
@@ -1945,7 +2042,10 @@ function buildIndex() {
   idx.roomByCode = {};
   idx.schedByRoomSlot = {};
   idx.assignmentsByClass = {};
+  idx.assignmentsByClassSubject = {};
+  idx.assignmentsByGroupKey = {};
   idx.teacherByClassSubject = Object.create(null);
+  idx.assignmentGroupWarnings = [];
   idx.exclusivePairSet = new Set();
   idx.scheduleCountByClass = {};
   idx.bindGroupByCode = {};
@@ -2117,8 +2217,20 @@ function buildIndex() {
     if (!idx.assignmentsByClass[cls]) idx.assignmentsByClass[cls] = [];
     idx.assignmentsByClass[cls].push(a);
     const sub = String(a['科目代碼'] || '');
-    if (cls && sub) idx.teacherByClassSubject[cls + '|' + sub] = a;
+    if (cls && sub) {
+      const classSubjectKey = cls + '|' + sub;
+      if (!idx.assignmentsByClassSubject[classSubjectKey]) idx.assignmentsByClassSubject[classSubjectKey] = [];
+      idx.assignmentsByClassSubject[classSubjectKey].push(a);
+      const groupKey = getAssignmentGroupKey(a);
+      if (groupKey) {
+        if (!idx.assignmentsByGroupKey[groupKey]) idx.assignmentsByGroupKey[groupKey] = [];
+        idx.assignmentsByGroupKey[groupKey].push(a);
+      }
+      // 舊介面仍需單一預設值；需要精確分組時改查 assignmentsByClassSubject。
+      if (!idx.teacherByClassSubject[classSubjectKey]) idx.teacherByClassSubject[classSubjectKey] = a;
+    }
   }
+  idx.assignmentGroupWarnings = getAssignmentGroupWarnings(state.assignments);
 
   // 教師互斥索引
   for (let i = 0; i < state.teacherExclusives.length; i++) {
@@ -2982,11 +3094,18 @@ function getClassTeacherList(cell) {
   const classCode = String(cell['班級代碼'] || '').trim();
   const subjectCode = String(cell['科目代碼'] || '').trim();
   if (!classCode || !subjectCode) return scheduled;
-  const assignment = (idx.teacherByClassSubject && idx.teacherByClassSubject[classCode + '|' + subjectCode]) ||
-    (state.assignments || []).find(item =>
+  const candidates = idx.assignmentsByClassSubject?.[classCode + '|' + subjectCode] ||
+    (state.assignments || []).filter(item =>
       String(item['班級代碼'] || '').trim() === classCode &&
       String(item['科目代碼'] || '').trim() === subjectCode
     );
+  const assignmentMatches = (entry, item) => {
+    if (typeof scheduleEntryMatchesAssignment === 'function') return scheduleEntryMatchesAssignment(entry, item);
+    const entryCodes = typeof getCellTeacherCodes === 'function' ? getCellTeacherCodes(entry) : [String(entry?.['教師姓名'] || '').trim()].filter(Boolean);
+    const itemCodes = typeof getCellTeacherCodes === 'function' ? getCellTeacherCodes(item) : [String(item?.['教師姓名'] || '').trim()].filter(Boolean);
+    return entryCodes.length === itemCodes.length && entryCodes.every(code => itemCodes.includes(code));
+  };
+  const assignment = candidates.find(item => assignmentMatches(cell, item)) || candidates[0];
   const configured = assignment ? getCellTeacherList(assignment) : [];
   return configured.length > 0 ? configured : scheduled;
 }
@@ -3261,6 +3380,9 @@ function renderP8Cell(day, classCode, target = 'primary') {
 // 教師待排科目選單（Teacher Subject Drag Palette）
 // ============================================================
 function renderTeacherSubjectPalette(teacherCode, target = 'primary') {
+  const assignmentGroupKeyOf = assignment => typeof getAssignmentGroupKey === 'function'
+    ? getAssignmentGroupKey(assignment)
+    : String(assignment?.['班級代碼'] || '').trim() + '|' + String(assignment?.['科目代碼'] || '').trim() + '|' + String(assignment?.['備註'] || '').trim();
   const pane = getTimetablePane(target);
   const box = document.getElementById(pane.teacherPalette);
   const infoSpan = document.getElementById(pane.teacherPaletteInfo);
@@ -3290,13 +3412,17 @@ function renderTeacherSubjectPalette(teacherCode, target = 'primary') {
     const isVirtual = cls && cls['是否虛擬班'] === 'TRUE';
     const sub       = idx.subjectByCode[subCode];
 
-    const weekly = getAssignmentWeeklyValue(a, sub, 3);
-    const isAlternateWeek = isAlternateWeeklyValue(weekly);
-    const teacherList = getCellTeacherList(a);
+     const weekly = getAssignmentWeeklyValue(a, sub, 3);
+     const isAlternateWeek = isAlternateWeeklyValue(weekly);
+     const teacherList = getCellTeacherList(a);
+     const assignmentGroupKey = assignmentGroupKeyOf(a);
+     const assignmentNote = String(a['備註'] || '').trim();
 
-     const color = getScheduleCellColor(subCode, classCode);
+      const color = getScheduleCellColor(subCode, classCode);
 
-    const scheduledCount = idx.scheduleCountByTeacherClassSubject?.[String(teacherCode)+'|'+String(classCode)+'|'+String(subCode)] || 0;
+     const scheduledCount = Object.prototype.hasOwnProperty.call(idx.scheduleCountByAssignmentGroup || {}, assignmentGroupKey)
+       ? idx.scheduleCountByAssignmentGroup[assignmentGroupKey]
+       : (idx.scheduleCountByTeacherClassSubject?.[String(teacherCode)+'|'+String(classCode)+'|'+String(subCode)] || 0);
 
     const remaining = Math.max(0, weekly - scheduledCount);
     const isDone = remaining === 0;
@@ -3305,7 +3431,7 @@ function renderTeacherSubjectPalette(teacherCode, target = 'primary') {
     const badgeText = isDone ? `已滿 ${formatWeeklyValue(scheduledCount)}/${formatWeeklyValue(weekly)}節` : `已排 ${formatWeeklyValue(scheduledCount)}/${formatWeeklyValue(weekly)} (剩${formatWeeklyValue(remaining)}節)`;
     const cardClass = isDone ? 'palette-card done' : 'palette-card';
 
-      const card = `<div class="${cardClass}" ${!isDone ? 'draggable="true"' : ''} data-item-index="${itemIndex}" data-cls="${esc(classCode)}" data-sub="${esc(subCode)}" data-tc="${esc(teacherCode)}" data-attr="${esc(isVirtual ? '抽離' : '一般')}" data-alternate-week="${isAlternateWeek ? 'true' : 'false'}"><span class="palette-link" onclick="selectClassFromPalette(event, '${esc(classCode)}')" title="班級：${esc(className)}；點擊切換左欄課表">🏫 <span class="palette-label-text">${esc(className)}</span></span><span class="cell-chip" title="${esc(subCode)}" style="background:${color.bg};color:${color.text};padding:1px 5px;font-size:11px;">${esc(subCode)}</span><span class="badge-count ${badgeClass}" title="${esc(badgeText)}">${badgeText}</span></div>`;
+      const card = `<div class="${cardClass}" ${!isDone ? 'draggable="true"' : ''} data-item-index="${itemIndex}" data-assignment-id="${esc(a['配課ID'] || '')}" data-cls="${esc(classCode)}" data-sub="${esc(subCode)}" data-tc="${esc(teacherCode)}" data-attr="${esc(isVirtual ? '抽離' : '一般')}" data-alternate-week="${isAlternateWeek ? 'true' : 'false'}"><span class="palette-link" onclick="selectClassFromPalette(event, '${esc(classCode)}')" title="班級：${esc(className)}；點擊切換左欄課表">🏫 <span class="palette-label-text">${esc(className)}</span></span><span class="cell-chip" title="${esc(subCode)}" style="background:${color.bg};color:${color.text};padding:1px 5px;font-size:11px;">${esc(subCode)}</span>${assignmentNote ? `<span class="palette-note" title="備註：${esc(assignmentNote)}">${esc(assignmentNote)}</span>` : ''}<span class="badge-count ${badgeClass}" title="${esc(badgeText)}">${badgeText}</span></div>`;
     if (isDone) { doneHtml += card; doneCount++; }
     else pendingHtml += card;
   });
@@ -3320,10 +3446,12 @@ function renderTeacherSubjectPalette(teacherCode, target = 'primary') {
       ui.drag = {
         isPalette: true,
         cls: card.dataset.cls,
-        subjectCode: card.dataset.sub,
-        teacherCode: teacherCode,
+         subjectCode: card.dataset.sub,
+         teacherCode: teacherCode,
          teacherList: assignment ? getCellTeacherList(assignment) : [],
-         attr: card.dataset.attr,
+          assignmentId: card.dataset.assignmentId || (assignment ? String(assignment['配課ID'] || '') : ''),
+          assignmentGroupKey: assignment ? assignmentGroupKeyOf(assignment) : '',
+          attr: card.dataset.attr,
          isAlternateWeek: card.dataset.alternateWeek === 'true'
       };
       resetDragConflictCache();
@@ -3921,6 +4049,9 @@ function renderTeacherTT(teacherCode, target = 'primary') {
 // 待排科目選單（Subject Drag Palette）
 // ============================================================
 function renderSubjectPalette(classCode, target = 'primary') {
+  const assignmentGroupKeyOf = assignment => typeof getAssignmentGroupKey === 'function'
+    ? getAssignmentGroupKey(assignment)
+    : String(assignment?.['班級代碼'] || '').trim() + '|' + String(assignment?.['科目代碼'] || '').trim() + '|' + String(assignment?.['備註'] || '').trim();
   const pane = getTimetablePane(target);
   const box = document.getElementById(pane.classPalette);
   const infoSpan = document.getElementById(pane.classPaletteInfo);
@@ -3961,13 +4092,16 @@ function renderSubjectPalette(classCode, target = 'primary') {
      const weekly = getAssignmentWeeklyValue(a, sub, 3);
     const teacherList = getCellTeacherList(a);
     const teacherCodes = teacherList.map(item => item['教師姓名']).filter(Boolean);
-    return {
-      subjectCode: a['科目代碼'],
-      teacherCode: teacherCodes[0] || a['教師姓名'] || a['教師代碼'] || a['教師'] || '',
-      teacherList,
-       weekly,
-       attr: isVirtual ? '抽離' : '一般',
-       isAlternateWeek: isAlternateWeeklyValue(weekly)
+     return {
+       subjectCode: a['科目代碼'],
+       teacherCode: teacherCodes[0] || a['教師姓名'] || a['教師代碼'] || a['教師'] || '',
+       teacherList,
+       assignmentId: String(a['配課ID'] || ''),
+        assignmentGroupKey: assignmentGroupKeyOf(a),
+       note: String(a['備註'] || '').trim(),
+        weekly,
+        attr: isVirtual ? '抽離' : '一般',
+        isAlternateWeek: isAlternateWeeklyValue(weekly)
     };
   });
 
@@ -3989,7 +4123,9 @@ function renderSubjectPalette(classCode, target = 'primary') {
         : name;
     }).join('／') || (teacher ? (teacher['教師姓名'] || teacher['姓名'] || tcCode) : (tcCode || '未定'));
 
-    const scheduledCount = idx.scheduleCountByClassSubject?.[String(classCode)+'|'+String(subCode)] || 0;
+    const scheduledCount = Object.prototype.hasOwnProperty.call(idx.scheduleCountByAssignmentGroup || {}, item.assignmentGroupKey)
+      ? idx.scheduleCountByAssignmentGroup[item.assignmentGroupKey]
+      : (idx.scheduleCountByClassSubject?.[String(classCode)+'|'+String(subCode)] || 0);
     const remaining = Math.max(0, weekly - scheduledCount);
     const isDone = remaining === 0;
 
@@ -3997,7 +4133,7 @@ function renderSubjectPalette(classCode, target = 'primary') {
      const badgeText = isDone ? `已滿 ${formatWeeklyValue(scheduledCount)}/${formatWeeklyValue(weekly)}節` : `已排 ${formatWeeklyValue(scheduledCount)}/${formatWeeklyValue(weekly)} (剩${formatWeeklyValue(remaining)}節)`;
     const cardClass = isDone ? 'palette-card done' : 'palette-card';
 
-      const card = `<div class="${cardClass}" ${!isDone ? 'draggable="true"' : ''} data-item-index="${itemIndex}" data-sub="${esc(subCode)}" data-tc="${esc(tcCode)}" data-attr="${esc(item.attr)}" data-alternate-week="${item.isAlternateWeek ? 'true' : 'false'}"><span class="cell-chip" title="${esc(subCode)}" style="background:${color.bg};color:${color.text};padding:1px 5px;font-size:11px;">${esc(subCode)}</span><span class="palette-link" onclick="selectTeacherFromPalette(event, '${esc(tcCode)}')" title="教師：${esc(teacherName)}；點擊切換右欄課表">👤 <span class="palette-label-text">${esc(teacherName)}</span></span><span class="badge-count ${badgeClass}" title="${esc(badgeText)}">${badgeText}</span></div>`;
+      const card = `<div class="${cardClass}" ${!isDone ? 'draggable="true"' : ''} data-item-index="${itemIndex}" data-assignment-id="${esc(item.assignmentId)}" data-sub="${esc(subCode)}" data-tc="${esc(tcCode)}" data-attr="${esc(item.attr)}" data-alternate-week="${item.isAlternateWeek ? 'true' : 'false'}"><span class="cell-chip" title="${esc(subCode)}" style="background:${color.bg};color:${color.text};padding:1px 5px;font-size:11px;">${esc(subCode)}</span><span class="palette-link" onclick="selectTeacherFromPalette(event, '${esc(tcCode)}')" title="教師：${esc(teacherName)}；點擊切換右欄課表">👤 <span class="palette-label-text">${esc(teacherName)}</span></span>${item.note ? `<span class="palette-note" title="備註：${esc(item.note)}">${esc(item.note)}</span>` : ''}<span class="badge-count ${badgeClass}" title="${esc(badgeText)}">${badgeText}</span></div>`;
     if (isDone) { doneHtml += card; doneCount++; }
     else pendingHtml += card;
   });
@@ -4012,9 +4148,11 @@ function renderSubjectPalette(classCode, target = 'primary') {
       ui.drag = {
         isPalette: true,
         subjectCode: card.dataset.sub,
-         teacherCode: card.dataset.tc,
-         teacherList: item?.teacherList || [],
-         attr: card.dataset.attr,
+          teacherCode: card.dataset.tc,
+          teacherList: item?.teacherList || [],
+          assignmentId: card.dataset.assignmentId || item?.assignmentId || '',
+          assignmentGroupKey: item?.assignmentGroupKey || '',
+          attr: card.dataset.attr,
          isAlternateWeek: item?.isAlternateWeek === true
       };
       resetDragConflictCache();
@@ -4309,11 +4447,12 @@ function getTeacherForClassSubject(cls, subjectCode, defaultTcInfo) {
   if (defaultTcInfo && String(cls) === String(defaultTcInfo.targetCls) && defaultTcInfo.tc) {
     return String(defaultTcInfo.tc);
   }
-  const asgn = (idx.teacherByClassSubject && idx.teacherByClassSubject[String(cls) + '|' + String(subjectCode)])
-    || state.assignments.find(a =>
-    String(a['班級代碼']) === String(cls) &&
-    String(a['科目代碼']) === String(subjectCode)
-  );
+  const candidates = idx.assignmentsByClassSubject?.[String(cls) + '|' + String(subjectCode)] ||
+    state.assignments.filter(a =>
+      String(a['班級代碼']) === String(cls) &&
+      String(a['科目代碼']) === String(subjectCode)
+    );
+  const asgn = candidates[0];
   if (asgn && asgn['教師姓名']) return String(asgn['教師姓名']);
 
   const existing = state.schedule.find(s =>
@@ -5668,6 +5807,12 @@ async function doSwap(a, b, force = false) {
 // 指派課程 Modal
 // ============================================================
 function openAssignModal(cls, day, per, weekType) {
+  const assignmentMatchesTarget = (entry, assignment) => {
+    if (typeof scheduleEntryMatchesAssignment === 'function') return scheduleEntryMatchesAssignment(entry, assignment);
+    const entryCodes = typeof getCellTeacherCodes === 'function' ? getCellTeacherCodes(entry) : [String(entry?.['教師姓名'] || '').trim()].filter(Boolean);
+    const assignmentCodes = typeof getCellTeacherCodes === 'function' ? getCellTeacherCodes(assignment) : [String(assignment?.['教師姓名'] || '').trim()].filter(Boolean);
+    return entryCodes.length === assignmentCodes.length && entryCodes.every(code => assignmentCodes.includes(code));
+  };
   const targetCell = per === 8 && weekType
     ? ((idx.schedByClassSlotP8?.[cls + '|' + day + '|8'] || {})[weekType] || null)
     : ((idx && idx.schedByClassSlot) ? (idx.schedByClassSlot[cls + '|' + day + '|' + per] || null) : null);
@@ -5685,9 +5830,13 @@ function openAssignModal(cls, day, per, weekType) {
       isAlternateWeeklyValue(getAssignmentWeeklyValue(a, idx.subjectByCode?.[String(a['科目代碼'] || '').trim()], 3)))
   );
   const existingSub = targetCell ? String(targetCell['科目代碼'] || '').trim() : '';
-  const matchedAssignmentIndex = existingSub
+  const exactAssignmentIndex = existingSub
+    ? myAssignments.findIndex(a => String(a['科目代碼'] || '').trim() === existingSub && assignmentMatchesTarget(targetCell, a))
+    : -1;
+  const fallbackAssignmentIndex = existingSub
     ? myAssignments.findIndex(a => String(a['科目代碼'] || '').trim() === existingSub)
     : -1;
+  const matchedAssignmentIndex = exactAssignmentIndex >= 0 ? exactAssignmentIndex : fallbackAssignmentIndex;
   const matchedAssignment = matchedAssignmentIndex >= 0 ? myAssignments[matchedAssignmentIndex] : null;
   if (matchedAssignment) {
     ui.assignTarget.assignmentId = String(matchedAssignment['配課ID'] || '');
@@ -5704,7 +5853,8 @@ function openAssignModal(cls, day, per, weekType) {
       const tag = String(item['標籤'] || '').trim();
       return name + (tag ? '（' + tag + '）' : '');
     }).filter(Boolean).join('、');
-    html += '<option value="'+i+'"'+(i === matchedAssignmentIndex ? ' selected' : '')+'>'+esc(a['科目代碼'] || '')+' / '+esc(teacherLabel)+'</option>';
+     const note = String(a['備註'] || '').trim();
+     html += '<option value="'+i+'"'+(i === matchedAssignmentIndex ? ' selected' : '')+'>'+esc(a['科目代碼'] || '')+' / '+esc(teacherLabel)+(note ? '／備註：'+esc(note) : '')+'</option>';
   });
   html += '</select></div>';
   html += '<div style="border-top:1px solid var(--border);padding-top:14px;">';
@@ -8018,6 +8168,11 @@ async function executeAutoScheduleCore(runOptions = {}) {
     // 協同配課必須主教師與每位協同教師都存在，不能只命中其中一位就算完成。
     return wanted.length > 0 && wanted.every(code => actual.includes(code));
   };
+  const autoTeacherSetsEquivalent = (left, right) => {
+    const leftSet = new Set(resolveAutoTeacherCodes(left));
+    const rightSet = new Set(resolveAutoTeacherCodes(right));
+    return leftSet.size === rightSet.size && [...leftSet].every(code => rightSet.has(code));
+  };
   const canonicalAutoTeacherCode = value => {
     const identities = resolveAutoTeacherCodes(value);
     const teacher = identities.map(code => idx.teacherByCode[code]).find(Boolean);
@@ -8059,6 +8214,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
     return Math.max(1, parseInt(room?.['容量'] || '1', 10) || 1);
   };
   const weeklyTargetByClassSubject = new Map();
+  const weeklyTargetByAssignmentGroup = new Map();
   const parseAutoBindList = value => {
     if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
     if (typeof value === 'number') return String(value).match(/.{3}/g) || [];
@@ -8070,6 +8226,54 @@ async function executeAutoScheduleCore(runOptions = {}) {
   const getAutoBindMemberKey = (classCode, subjectCode) => String(classCode || '').trim() + '|' + String(subjectCode || '').trim();
   const activeAssignments = (state.assignments || []).filter(assignment => !isPreplannedCourse(assignment['課程屬性']));
   const assignmentWeeklyByClassSubject = buildAutoAssignmentWeeklyIndex(activeAssignments, idx.subjectByCode);
+  const assignmentByGroupKey = new Map();
+  (state.assignments || []).forEach(assignment => {
+    const groupKey = getAssignmentGroupKey(assignment);
+    if (groupKey && !assignmentByGroupKey.has(groupKey)) assignmentByGroupKey.set(groupKey, assignment);
+  });
+  const alternateAssignmentGroupKeys = new Set(activeAssignments
+    .filter(assignment => isAlternateWeeklyValue(getAssignmentWeeklyValue(assignment, idx.subjectByCode?.[String(assignment['科目代碼'] || '').trim()], 3)))
+    .map(getAssignmentGroupKey)
+    .filter(Boolean));
+  const getAutoAssignmentGroupKey = value => {
+    const explicit = String(value?.assignmentGroupKey || '').trim();
+    if (explicit && assignmentByGroupKey.has(explicit)) return explicit;
+    const classCode = String(value?.classCode ?? value?.['班級代碼'] ?? '').trim();
+    const subjectCode = String(value?.subjectCode ?? value?.['科目代碼'] ?? '').trim();
+    if (!classCode || !subjectCode) return '';
+    const candidates = (state.assignments || []).filter(assignment =>
+      String(assignment['班級代碼'] || '').trim() === classCode &&
+      String(assignment['科目代碼'] || '').trim() === subjectCode
+    );
+    if (candidates.length === 0) return '';
+    const teacherValue = value?.teacherValue !== undefined
+      ? value.teacherValue
+      : (value?.teacherCodes?.length ? value.teacherCodes : value?.['教師姓名']);
+    const exact = teacherValue
+      ? candidates.filter(assignment => autoTeacherSetsEquivalent(assignment, { '教師姓名': teacherValue }))
+      : [];
+    if (exact.length > 0) return getAssignmentGroupKey(exact[0]);
+    return candidates.length === 1 ? getAssignmentGroupKey(candidates[0]) : '';
+  };
+  const getAutoAssignmentGroupKeysForScheduleEntry = entry => {
+    const explicit = String(entry?.__assignmentGroupKey || '').trim();
+    if (explicit && assignmentByGroupKey.has(explicit)) return [explicit];
+    return getAssignmentGroupKeysForScheduleEntry(entry, state.assignments);
+  };
+  const withAutoAssignmentGroupKey = (entry, assignmentOrGroupKey) => {
+    const groupKey = typeof assignmentOrGroupKey === 'string'
+      ? assignmentOrGroupKey.trim()
+      : String(assignmentOrGroupKey?.assignmentGroupKey || '').trim();
+    if (entry && groupKey) {
+      Object.defineProperty(entry, '__assignmentGroupKey', {
+        value: groupKey,
+        enumerable: false,
+        configurable: true,
+        writable: true
+      });
+    }
+    return entry;
+  };
   const expandAutoBindGroupCohorts = group => {
     const members = getAutoBindMembers(group);
     const byClass = new Map();
@@ -8188,21 +8392,27 @@ async function executeAutoScheduleCore(runOptions = {}) {
 
   // 「全量自動」會真正重建所選範圍內的未凍結課程，避免只補洞而被舊排法卡死。
   // 分階段模式則保留手動調整結果：第一階段只重建必排與綁班，第二階段只補一般課。
-    const alternateClassSubjectKeys = new Set(activeAssignments
-     .filter(assignment => isAlternateWeeklyValue(getAssignmentWeeklyValue(assignment, idx.subjectByCode?.[String(assignment['科目代碼'] || '').trim()], 3)))
-     .map(assignment => String(assignment['班級代碼'] || '').trim() + '|' + String(assignment['科目代碼'] || '').trim()));
+     const alternateClassSubjectKeys = new Set(activeAssignments
+      .filter(assignment => isAlternateWeeklyValue(getAssignmentWeeklyValue(assignment, idx.subjectByCode?.[String(assignment['科目代碼'] || '').trim()], 3)))
+      .map(assignment => String(assignment['班級代碼'] || '').trim() + '|' + String(assignment['科目代碼'] || '').trim()));
    const isAlternateWeekScheduleEntry = entry => {
      const attr = String(entry?.['課堂屬性'] || '').trim();
      return parseInt(entry?.['節次'], 10) === 8 && (attr === '單週' || attr === '雙週');
    };
-   const isAlternateClassSubject = (classCode, subjectCode) => alternateClassSubjectKeys.has(
-     String(classCode || '').trim() + '|' + String(subjectCode || '').trim()
-   );
+    const isAlternateClassSubject = (classCode, subjectCode, teacherValue = '', assignmentGroupKey = '') => {
+      const groupKey = assignmentGroupKey || getAutoAssignmentGroupKey({
+        classCode,
+        subjectCode,
+        teacherValue
+      });
+      if (groupKey && alternateAssignmentGroupKeys.has(groupKey)) return true;
+      return !groupKey && alternateClassSubjectKeys.has(String(classCode || '').trim() + '|' + String(subjectCode || '').trim());
+    };
    const isEntryInsideAutoRange = entry => {
      const period = parseInt(entry?.['節次'], 10);
      if (!Number.isFinite(period) || isManualOnlyPeriod(period) || period < autoStartPeriod || period > autoEndPeriod) return false;
       const helper = String(entry?.['科目代碼'] || '').trim().endsWith('輔');
-     const alternate = isAlternateWeekScheduleEntry(entry) || isAlternateClassSubject(entry?.['班級代碼'], entry?.['科目代碼']);
+      const alternate = isAlternateWeekScheduleEntry(entry) || isAlternateClassSubject(entry?.['班級代碼'], entry?.['科目代碼'], entry?.['教師姓名']);
      if (optP8Only) return period === 8 && (helper || alternate);
      if (period === 8) return autoEndPeriod >= 8 && (helper || alternate);
      return !helper && !alternate && period <= 7;
@@ -8221,6 +8431,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
   };
   const scheduleSeed = state.schedule.filter(entry => !shouldRebuildExistingEntry(entry));
   const scheduleEntriesByClassSubject = buildAutoScheduleEntriesByClassSubject(scheduleSeed);
+  const scheduleEntriesByAssignmentGroup = buildAutoScheduleEntriesByAssignmentGroup(scheduleSeed, activeAssignments);
   const rebuiltExistingCount = state.schedule.length - scheduleSeed.length;
   if (rebuiltExistingCount > 0) {
     console.log('[AutoSchedule] 重新最佳化 ' + rebuiltExistingCount + ' 節未凍結課程。');
@@ -8240,15 +8451,22 @@ async function executeAutoScheduleCore(runOptions = {}) {
      const totalWeekly = getAssignmentWeeklyValue(asgn, sub, 3);
      const isAlternateWeek = isAlternateWeeklyValue(totalWeekly);
      const isP8Lesson = isAlternateWeek || isHelperSubjectCode(subjectCode);
-    const classSubjectKey = classCode + '|' + subjectCode;
-    weeklyTargetByClassSubject.set(classSubjectKey, (weeklyTargetByClassSubject.get(classSubjectKey) || 0) + totalWeekly);
+      const classSubjectKey = classCode + '|' + subjectCode;
+      const assignmentGroupKey = getAssignmentGroupKey(asgn);
+      weeklyTargetByClassSubject.set(classSubjectKey, (weeklyTargetByClassSubject.get(classSubjectKey) || 0) + totalWeekly);
+      weeklyTargetByAssignmentGroup.set(assignmentGroupKey, (weeklyTargetByAssignmentGroup.get(assignmentGroupKey) || 0) + totalWeekly);
 
+      // 保留班級／科目索引供舊資料與既有測試相容；分組配課優先使用下方精確索引。
       const existingCount = (scheduleEntriesByClassSubject.get(classSubjectKey) || [])
         .filter(entry => !isPreplannedScheduleEntry(entry) && (!teacherCode || autoTeacherMatches(entry, teacherCode)))
         .reduce((total, entry) => total + getScheduleWeeklyUnits(entry), 0);
+      const assignmentExistingCount = (scheduleEntriesByAssignmentGroup.get(assignmentGroupKey) || [])
+        .filter(entry => !isPreplannedScheduleEntry(entry) && (!teacherCode || autoTeacherMatches(entry, teacherCode)))
+        .reduce((total, entry) => total + getScheduleWeeklyUnits(entry), 0);
+      const matchedExistingCount = assignmentGroupKey ? assignmentExistingCount : existingCount;
 
     // 配課完成度必須以「班級＋科目＋教師」核對；否則同班同科目由不同教師授課時，會誤算成已排。
-     const remainingNeeded = Math.max(0, totalWeekly - existingCount);
+      const remainingNeeded = Math.max(0, totalWeekly - matchedExistingCount);
      const lessonCount = isAlternateWeek
        ? (remainingNeeded > 0.000001 ? 1 : 0)
        : Math.ceil(Math.max(0, remainingNeeded) - 0.000001);
@@ -8283,9 +8501,10 @@ async function executeAutoScheduleCore(runOptions = {}) {
     const priorityScore = getAutoManualPriorityScore(subjectCode, teacherCode);
      for (let i = 0; i < lessonCount; i++) {
        pendingLessons.push({
-        id: `auto_${classCode}_${subjectCode}_${i}`,
-        classCode,
-        subjectCode,
+         id: `auto_${classCode}_${subjectCode}_${assignmentGroupKey}_${i}`,
+         classCode,
+         subjectCode,
+         assignmentGroupKey,
         teacherCode,
         teacherCodes: getAutoTeacherCodes(teacherCode),
         teacherValue: getAutoTeacherCodes(teacherCode).length > 1 ? getAutoTeacherCodes(teacherCode) : teacherCode,
@@ -8546,6 +8765,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
     const subjectCode = String(entry?.['科目代碼'] || '');
     const teacherCodes = getAutoTeacherCodes(entry);
     const teacherCode = teacherCodes[0] || String(entry?.['教師姓名'] || '');
+    const assignmentGroupKey = getAutoAssignmentGroupKey(entry);
     const subject = idx.subjectByCode[subjectCode];
     const applicableRules = getApplicableRules(subjectCode, classCode);
     const mustRuleSlots = [];
@@ -8556,13 +8776,14 @@ async function executeAutoScheduleCore(runOptions = {}) {
       id: `auto_${suffix}_${classCode}_${subjectCode}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       classCode,
       subjectCode,
+      assignmentGroupKey,
       teacherCode,
       teacherCodes,
       teacherValue: teacherCodes.length > 1 ? teacherCodes : teacherCode,
-      totalWeekly: weeklyTargetByClassSubject.get(classCode + '|' + subjectCode) || 1,
+      totalWeekly: weeklyTargetByAssignmentGroup.get(assignmentGroupKey) || weeklyTargetByClassSubject.get(classCode + '|' + subjectCode) || 1,
       weeklyUnit: isAlternateWeekScheduleEntry(entry) ? 0.5 : 1,
-      isAlternateWeek: isAlternateWeekScheduleEntry(entry) || isAlternateClassSubject(classCode, subjectCode),
-      isP8Lesson: isAlternateWeekScheduleEntry(entry) || isAlternateClassSubject(classCode, subjectCode) || isHelperSubjectCode(subjectCode),
+      isAlternateWeek: isAlternateWeekScheduleEntry(entry) || isAlternateClassSubject(classCode, subjectCode, teacherCodes, assignmentGroupKey),
+      isP8Lesson: isAlternateWeekScheduleEntry(entry) || isAlternateClassSubject(classCode, subjectCode, teacherCodes, assignmentGroupKey) || isHelperSubjectCode(subjectCode),
       weekType: isAlternateWeekScheduleEntry(entry) ? String(entry['課堂屬性'] || '').trim() : '',
       maxConsecDays: parseSubjectMaxConsecutiveDays(subject),
       subjectConstraintScore: getAutoSubjectConstraintScore(subjectCode, subject, classCode, parseSubjectMaxConsecutiveDays(subject)),
@@ -8608,6 +8829,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
     const weekTypes = period === 8
       ? ((attr === '單週' || attr === '雙週') ? [attr] : ['單週', '雙週'])
       : ['全週'];
+    const assignmentGroupKeys = getAutoAssignmentGroupKeysForScheduleEntry(item);
     if (classCode) weekTypes.forEach(weekType => scheduleLookup.classWeekSlots.add(classCode + '|' + day + '|' + period + '|' + weekType));
     const teacherTokens = getAutoTeacherCodes(item);
     const tCodes = resolveAutoTeacherCodes(item);
@@ -8660,7 +8882,8 @@ async function executeAutoScheduleCore(runOptions = {}) {
         if (grade) stats.gradeSlots.get(gradeSlotKey).add(grade);
       }
 
-      const weeklyTarget = weeklyTargetByClassSubject.get(classCode + '|' + subjectCode);
+      const assignmentGroupKey = assignmentGroupKeys[0] || '';
+      const weeklyTarget = weeklyTargetByAssignmentGroup.get(assignmentGroupKey) || weeklyTargetByClassSubject.get(classCode + '|' + subjectCode);
       if (day >= 1 && day <= 5 && weeklyTarget === 1 && grade) {
         if (!stats.gradeDayCounts.has(grade)) stats.gradeDayCounts.set(grade, new Map());
         const gradeDays = stats.gradeDayCounts.get(grade);
@@ -8692,7 +8915,15 @@ async function executeAutoScheduleCore(runOptions = {}) {
       scheduleLookup.classSubjectDays.set(key, (scheduleLookup.classSubjectDays.get(key) || 0) + 1);
       weekTypes.forEach(weekType => {
         const weekKey = classCode + '|' + subjectCode + '|' + day + '|' + weekType;
-        scheduleLookup.classSubjectWeekDays.set(weekKey, (scheduleLookup.classSubjectWeekDays.get(weekKey) || 0) + 1);
+         scheduleLookup.classSubjectWeekDays.set(weekKey, (scheduleLookup.classSubjectWeekDays.get(weekKey) || 0) + 1);
+       });
+      assignmentGroupKeys.forEach(groupKey => {
+        const groupDayKey = groupKey + '|' + day;
+        scheduleLookup.assignmentGroupDays.set(groupDayKey, (scheduleLookup.assignmentGroupDays.get(groupDayKey) || 0) + 1);
+        weekTypes.forEach(weekType => {
+          const groupWeekKey = groupKey + '|' + day + '|' + weekType;
+          scheduleLookup.assignmentGroupWeekDays.set(groupWeekKey, (scheduleLookup.assignmentGroupWeekDays.get(groupWeekKey) || 0) + 1);
+        });
       });
     }
     const roomCode = getSubjectRoomCode(subjectCode);
@@ -8747,8 +8978,10 @@ async function executeAutoScheduleCore(runOptions = {}) {
       teacherDayEntries: new Map(),
       subjectSlots: new Map(),
       subjectWeekSlots: new Map(),
-      classSubjectDays: new Map(),
-      classSubjectWeekDays: new Map(),
+       classSubjectDays: new Map(),
+       classSubjectWeekDays: new Map(),
+       assignmentGroupDays: new Map(),
+       assignmentGroupWeekDays: new Map(),
       roomSlots: new Map(),
       roomWeekSlots: new Map(),
       teacherDayPeriods: new Map(),
@@ -8797,19 +9030,26 @@ async function executeAutoScheduleCore(runOptions = {}) {
     return weekType || (lesson?.isVirtual ? '抽離' : '一般');
   };
 
-  function canPlaceClassSubjectOnDay(clsCode, subCode, day, targetSched, scheduleLookup, weekType = '') {
+  function canPlaceClassSubjectOnDay(clsCode, subCode, day, targetSched, scheduleLookup, weekType = '', assignmentGroupKey = '') {
     // 一般課程同班同科同日第二節禁止；明確必排連堂只放行指定節次數量。
+    const groupKey = assignmentGroupKey || getAutoAssignmentGroupKey({ classCode: clsCode, subjectCode: subCode });
     const prefix = String(clsCode) + '|' + String(subCode) + '|';
+    const groupPrefix = groupKey ? groupKey + '|' : prefix;
     const countForDay = targetDay => {
       if (scheduleLookup) {
         if (autoAlternateWeekTypes.includes(String(weekType || '').trim())) {
-          return scheduleLookup.classSubjectWeekDays.get(prefix + targetDay + '|' + weekType) || 0;
+          return groupKey
+            ? (scheduleLookup.assignmentGroupWeekDays.get(groupPrefix + targetDay + '|' + weekType) || 0)
+            : (scheduleLookup.classSubjectWeekDays.get(prefix + targetDay + '|' + weekType) || 0);
         }
-        return scheduleLookup.classSubjectDays.get(prefix + targetDay) || 0;
+        return groupKey
+          ? (scheduleLookup.assignmentGroupDays.get(groupPrefix + targetDay) || 0)
+          : (scheduleLookup.classSubjectDays.get(prefix + targetDay) || 0);
       }
       return targetSched.filter(s =>
         String(s['班級代碼']) === String(clsCode) && String(s['科目代碼']) === String(subCode) &&
         parseInt(s['星期'], 10) === targetDay &&
+        (!groupKey || getAutoAssignmentGroupKeysForScheduleEntry(s).includes(groupKey)) &&
         (!autoAlternateWeekTypes.includes(String(weekType || '').trim()) || getAutoEntryWeekTypes(s).includes(weekType))
       ).length;
     };
@@ -8817,27 +9057,33 @@ async function executeAutoScheduleCore(runOptions = {}) {
     const mandatoryDaySlots = getMandatoryRuleDaySlots(subCode, clsCode, day);
     return currentDayCount < (mandatoryDaySlots.length > 1 ? mandatoryDaySlots.length : 1);
   }
-  function isSubjectMaxConsecutiveDaysFeasible(clsCode, subCode, maxDays) {
-    const weeklyTarget = weeklyTargetByClassSubject.get(String(clsCode) + '|' + String(subCode)) || 0;
+  function isSubjectMaxConsecutiveDaysFeasible(clsCode, subCode, maxDays, assignmentGroupKey = '') {
+    const groupKey = assignmentGroupKey || getAutoAssignmentGroupKey({ classCode: clsCode, subjectCode: subCode });
+    const weeklyTarget = (groupKey ? weeklyTargetByAssignmentGroup.get(groupKey) : 0) || weeklyTargetByClassSubject.get(String(clsCode) + '|' + String(subCode)) || 0;
     if (weeklyTarget <= 0 || maxDays >= 5) return true;
     const maxDistinctDays = 5 - Math.floor(5 / (maxDays + 1));
     return weeklyTarget <= maxDistinctDays;
   }
-  function canPlaceSubjectWithinMaxConsecutiveDays(clsCode, subCode, day, targetSched, scheduleLookup) {
+  function canPlaceSubjectWithinMaxConsecutiveDays(clsCode, subCode, day, targetSched, scheduleLookup, assignmentGroupKey = '') {
     const subject = idx.subjectByCode[subCode];
     const maxDays = parseSubjectMaxConsecutiveDays(subject);
     if (maxDays <= 0 || maxDays >= 5) return true;
-    if (!isSubjectMaxConsecutiveDaysFeasible(clsCode, subCode, maxDays)) return true;
+    const groupKey = assignmentGroupKey || getAutoAssignmentGroupKey({ classCode: clsCode, subjectCode: subCode });
+    if (!isSubjectMaxConsecutiveDaysFeasible(clsCode, subCode, maxDays, groupKey)) return true;
 
     const prefix = String(clsCode) + '|' + String(subCode) + '|';
+    const groupPrefix = groupKey ? groupKey + '|' : prefix;
     const hasSubjectOnDay = targetDay => {
       if (scheduleLookup?.classSubjectDays) {
-        return (scheduleLookup.classSubjectDays.get(prefix + targetDay) || 0) > 0;
+        return groupKey
+          ? (scheduleLookup.assignmentGroupDays.get(groupPrefix + targetDay) || 0) > 0
+          : (scheduleLookup.classSubjectDays.get(prefix + targetDay) || 0) > 0;
       }
       return targetSched.some(entry =>
         String(entry['班級代碼']) === String(clsCode) &&
         String(entry['科目代碼']) === String(subCode) &&
-        parseInt(entry['星期'], 10) === targetDay
+        parseInt(entry['星期'], 10) === targetDay &&
+        (!groupKey || getAutoAssignmentGroupKeysForScheduleEntry(entry).includes(groupKey))
       );
     };
 
@@ -8893,10 +9139,15 @@ async function executeAutoScheduleCore(runOptions = {}) {
     if (isManualOnlyPeriod(period)) return false;
     if (period < autoStartPeriod || period > autoEndPeriod) return false;
     const isHelper = String(subCode || '').trim().endsWith('輔');
+    const assignmentGroupKey = String(validationOptions.assignmentGroupKey || '').trim() || getAutoAssignmentGroupKey({
+      classCode: clsCode,
+      subjectCode: subCode,
+      teacherValue: tcCode
+    });
     const explicitWeekType = autoAlternateWeekTypes.includes(String(validationOptions.weekType || '').trim())
       ? String(validationOptions.weekType).trim()
       : '';
-    const isAlternate = Boolean(explicitWeekType) || isAlternateClassSubject(clsCode, subCode);
+    const isAlternate = Boolean(explicitWeekType) || isAlternateClassSubject(clsCode, subCode, tcCode, assignmentGroupKey);
     if (isHelper && period !== 8) return false;
     if (!isHelper && !isAlternate && period === 8) return false;
     if (isAlternate && period !== 8) return false;
@@ -8969,10 +9220,11 @@ async function executeAutoScheduleCore(runOptions = {}) {
     const mustRules=applicableRules.filter(entry=>isMandatoryAutoRule(entry.rule));
     if(mustRules.length&&!mustRules.some(entry=>entry.slots.some(slot=>slot.day===day&&slot.period===period)))return false;
 
-    if (!canPlaceClassSubjectOnDay(clsCode, subCode, day, targetSched, scheduleLookup, targetWeekType)) {
+    if (!canPlaceClassSubjectOnDay(clsCode, subCode, day, targetSched, scheduleLookup, targetWeekType, assignmentGroupKey)) {
       return false;
     }
-    if (!canPlaceSubjectWithinMaxConsecutiveDays(clsCode, subCode, day, targetSched, scheduleLookup)) return false;
+    // 舊版檢核契約：if (!canPlaceSubjectWithinMaxConsecutiveDays(clsCode, subCode, day, targetSched, scheduleLookup)) return false;
+    if (!canPlaceSubjectWithinMaxConsecutiveDays(clsCode, subCode, day, targetSched, scheduleLookup, assignmentGroupKey)) return false;
 
     if (optTeacherConsec && tcCode) {
       for (const teacherToken of getAutoTeacherCodes(tcCode)) {
@@ -9009,10 +9261,14 @@ async function executeAutoScheduleCore(runOptions = {}) {
     }
 
     // 同科目分散排課
-    const subjectDayPrefix = String(lesson.classCode) + '|' + String(lesson.subjectCode) + '|';
+    const assignmentGroupKey = lesson.assignmentGroupKey || getAutoAssignmentGroupKey(lesson);
+    const subjectDayPrefix = assignmentGroupKey ? assignmentGroupKey + '|' : String(lesson.classCode) + '|' + String(lesson.subjectCode) + '|';
     const existingDays = [];
     for (let targetDay = 1; targetDay <= 5; targetDay++) {
-      if ((lookup.classSubjectDays.get(subjectDayPrefix + targetDay) || 0) > 0) existingDays.push(targetDay);
+      const count = assignmentGroupKey
+        ? (lookup.assignmentGroupDays.get(subjectDayPrefix + targetDay) || 0)
+        : (lookup.classSubjectDays.get(subjectDayPrefix + targetDay) || 0);
+      if (count > 0) existingDays.push(targetDay);
     }
 
     if (existingDays.length > 0) {
@@ -9216,7 +9472,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
         if (tcCode && resolveAutoTeacherCodes(tcCode).some(identity => idx.blockSet.has(identity + '|' + dayR + '|' + perR))) continue;
 
         // 同班同科每日一節原則
-        if (!canPlaceClassSubjectOnDay(l.classCode, l.subjectCode, dayR, localSchedule, mandatoryLookup)) continue;
+         if (!canPlaceClassSubjectOnDay(l.classCode, l.subjectCode, dayR, localSchedule, mandatoryLookup, '', l.assignmentGroupKey)) continue;
 
         // 檢查目標格是否有不可移動的凍結課
         const existingSlotIdx = localSchedule.findIndex(s =>
@@ -9261,7 +9517,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
 
       // 排入
       const id = 'AUTO_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4);
-      appendLocalSchedule({
+      appendLocalSchedule(withAutoAssignmentGroupKey({
         '課表ID': id,
         '班級代碼': String(l.classCode),
         '星期': best.dayR,
@@ -9271,7 +9527,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
         '課堂屬性': getAutoScheduleAttribute(l, best.dayR, best.perR, localSchedule, buildScheduleLookup(localSchedule)),
         '是否鎖定': 'FALSE',
         '__isMustRule': true
-      });
+      }, l));
       successCount++;
       scheduledFlag[i] = true;
       console.log(`  ✅ 必排 ${sub} (${l.classCode}) → 星期${best.dayR}第${best.perR}節（從 ${allowedSlots.length} 個合法格中選最佳）`);
@@ -9391,13 +9647,15 @@ async function executeAutoScheduleCore(runOptions = {}) {
       // 同班同科同日、科目最多連日，以及教師最大連堂。只讓普通課程讓位，
       // 鎖課、必排與既有綁班仍由 addVictim() 擋住。
        roundLsn.forEach(lesson => {
-        if (!canPlaceClassSubjectOnDay(
-          lesson.classCode,
-          lesson.subjectCode,
-          day,
-          current,
-          currentLookup
-        )) {
+         if (!canPlaceClassSubjectOnDay(
+           lesson.classCode,
+           lesson.subjectCode,
+           day,
+           current,
+           currentLookup,
+           '',
+           lesson.assignmentGroupKey
+         )) {
           current
             .filter(entry =>
               String(entry['班級代碼']) === String(lesson.classCode) &&
@@ -9408,13 +9666,14 @@ async function executeAutoScheduleCore(runOptions = {}) {
             .forEach(addVictim);
         }
 
-        if (!canPlaceSubjectWithinMaxConsecutiveDays(
-          lesson.classCode,
-          lesson.subjectCode,
-          day,
-          current,
-          currentLookup
-        )) {
+         if (!canPlaceSubjectWithinMaxConsecutiveDays(
+           lesson.classCode,
+           lesson.subjectCode,
+           day,
+           current,
+           currentLookup,
+           lesson.assignmentGroupKey
+         )) {
           current
             .filter(entry =>
               String(entry['班級代碼']) === String(lesson.classCode) &&
@@ -9648,7 +9907,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
             requeuedLessons.push(makeAutoLessonFromScheduleEntry(entry, 'bind_evict'));
           });
           roundLsn.forEach((lesson, lessonIndex) => {
-            appendLocalSchedule({
+            appendLocalSchedule(withAutoAssignmentGroupKey({
               '課表ID': 'AUTO_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4) + '_B' + round + '_' + lessonIndex,
               '班級代碼': String(lesson.classCode),
               '星期': candidate.day,
@@ -9658,8 +9917,8 @@ async function executeAutoScheduleCore(runOptions = {}) {
                '課堂屬性': getAutoScheduleAttribute(lesson, candidate.day, candidate.per, localSchedule, buildScheduleLookup(localSchedule)),
                '是否鎖定': 'FALSE',
                '__isBindGroup': true,
-              '__bindGroupKey': String(group['群組ID'] || group['群組名稱'] || groupIndex) + '|' + round
-            });
+               '__bindGroupKey': String(group['群組ID'] || group['群組名稱'] || groupIndex) + '|' + round
+            }, lesson));
             successCount++;
             scheduledFlag[roundIndexes[lessonIndex]] = true;
           });
@@ -10000,15 +10259,15 @@ async function executeAutoScheduleCore(runOptions = {}) {
 
     if (candidateSlots.length > 0) {
       const best = selectAutoCandidate(candidateSlots, lesson);
-      appendLocalSchedule({
+      appendLocalSchedule(withAutoAssignmentGroupKey({
         '課表ID': 'AUTO_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
         '班級代碼': String(lesson.classCode),
         '星期': best.day, '節次': best.per,
         '科目代碼': String(lesson.subjectCode),
         '教師姓名': autoTeacherValue(lesson),
         '課堂屬性': getAutoScheduleAttribute(lesson, best.day, best.per, localSchedule, lessonLookup),
-              '是否鎖定': 'FALSE'
-      });
+               '是否鎖定': 'FALSE'
+      }, lesson));
       successCount++;
     } else {
       // 4. 智慧交換機制：嘗試移動已排課程來騰出位置
@@ -10046,12 +10305,12 @@ async function executeAutoScheduleCore(runOptions = {}) {
               if (isSlotValid(lesson.classCode, lesson.subjectCode, autoTeacherInput(lesson), day, per, tempSched, tempLookup)) {
                 // 建立「含新課（lesson 排在 day/per）」的 lookup，用於驗證 victim 的新位置
                 // 避免：victim 與 lesson 同班同科時，victim 搬到 lesson 同一天卻查不到 lesson 的計數
-                const tempSchedWithLesson = [...tempSched, {
+                 const tempSchedWithLesson = [...tempSched, withAutoAssignmentGroupKey({
                   '班級代碼': String(lesson.classCode),
                   '星期': day, '節次': per,
                   '科目代碼': String(lesson.subjectCode),
                   '教師姓名': autoTeacherValue(lesson)
-                }];
+                 }, lesson)];
                 const tempLookupWithLesson = buildScheduleLookup(tempSchedWithLesson);
                 // 對所有合法的 victim 新位置評分，選最佳（而非第一個合法）
                 let victimCandidate = null;
@@ -10069,8 +10328,8 @@ async function executeAutoScheduleCore(runOptions = {}) {
                 if (victimCandidate && !swapped) {
                   // 選第一個合法位置（swap 不做評分，效能優先）
                   const { newD, newP } = victimCandidate;
-                  setLocalScheduleEntry(occupiedIdx, { ...victim, '星期': newD, '節次': newP });
-                  appendLocalSchedule({
+                   setLocalScheduleEntry(occupiedIdx, withAutoAssignmentGroupKey({ ...victim, '星期': newD, '節次': newP }, victim.__assignmentGroupKey || getAutoAssignmentGroupKey(victim)));
+                  appendLocalSchedule(withAutoAssignmentGroupKey({
                     '課表ID': 'AUTO_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
                     '班級代碼': String(lesson.classCode),
                     '星期': day, '節次': per,
@@ -10078,7 +10337,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
                     '教師姓名': autoTeacherValue(lesson),
                     '課堂屬性': getAutoScheduleAttribute(lesson, day, per, localSchedule, buildScheduleLookup(localSchedule)),
                     '是否鎖定': 'FALSE'
-                  });
+                  }, lesson));
                   successCount++;
                   swapped = true;
                 }
@@ -10178,7 +10437,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
         if (candidates.length > 0) {
           const best = selectAutoCandidate(candidates, roundLsn);
           roundLsn.forEach((l, gi) => {
-              appendLocalSchedule({ '課表ID': 'AUTO_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4) + '_R' + r + '_' + gi, '班級代碼': String(l.classCode), '星期': best.day, '節次': best.per, '科目代碼': String(l.subjectCode), '教師姓名': autoTeacherValue(l), '課堂屬性': getAutoScheduleAttribute(l, best.day, best.per, localSchedule, buildScheduleLookup(localSchedule)), '是否鎖定': 'FALSE', '__isBindGroup': true });
+              appendLocalSchedule(withAutoAssignmentGroupKey({ '課表ID': 'AUTO_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4) + '_R' + r + '_' + gi, '班級代碼': String(l.classCode), '星期': best.day, '節次': best.per, '科目代碼': String(l.subjectCode), '教師姓名': autoTeacherValue(l), '課堂屬性': getAutoScheduleAttribute(l, best.day, best.per, localSchedule, buildScheduleLookup(localSchedule)), '是否鎖定': 'FALSE', '__isBindGroup': true }, l));
             successCount++;
           });
           roundIdx.forEach(i => placedSet.add(i));
@@ -10224,7 +10483,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
       }
       if (retryCandidates.length > 0) {
         const best = selectAutoCandidate(retryCandidates, lesson);
-        appendLocalSchedule({
+        appendLocalSchedule(withAutoAssignmentGroupKey({
           '課表ID': 'AUTO_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
           '班級代碼': String(lesson.classCode),
           '星期': best.day, '節次': best.per,
@@ -10232,7 +10491,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
           '教師姓名': autoTeacherValue(lesson),
           '課堂屬性': getAutoScheduleAttribute(lesson, best.day, best.per, localSchedule, retryLookup),
           '是否鎖定': 'FALSE'
-        });
+        }, lesson));
         successCount++;
         placed = true;
       }
@@ -10285,8 +10544,8 @@ async function executeAutoScheduleCore(runOptions = {}) {
                   if (victimCandidate) break;
                 }
                 if (victimCandidate && !placed) {
-                  setLocalScheduleEntry(occupiedIdx, { ...victim, '星期': victimCandidate.newD, '節次': victimCandidate.newP });
-                  appendLocalSchedule({
+                   setLocalScheduleEntry(occupiedIdx, withAutoAssignmentGroupKey({ ...victim, '星期': victimCandidate.newD, '節次': victimCandidate.newP }, victim.__assignmentGroupKey || getAutoAssignmentGroupKey(victim)));
+                  appendLocalSchedule(withAutoAssignmentGroupKey({
                     '課表ID': 'AUTO_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
                     '班級代碼': String(lesson.classCode),
                     '星期': day, '節次': per,
@@ -10294,7 +10553,7 @@ async function executeAutoScheduleCore(runOptions = {}) {
                     '教師姓名': autoTeacherValue(lesson),
                     '課堂屬性': getAutoScheduleAttribute(lesson, day, per, localSchedule, buildScheduleLookup(localSchedule)),
                     '是否鎖定': 'FALSE'
-                  });
+                  }, lesson));
                   successCount++;
                   placed = true;
                 }
@@ -10374,9 +10633,9 @@ async function executeAutoScheduleCore(runOptions = {}) {
     const isRepairProtectedEntry = entry =>
       !entry || repairPinnedEntries.has(entry) || isFrozenAutoEntry(entry) || isBindAutoEntry(entry);
 
-    function buildRepairEntry(item, day, period) {
-      if (item.entryTemplate) return { ...item.entryTemplate, '星期': day, '節次': period };
-      return {
+     function buildRepairEntry(item, day, period) {
+       if (item.entryTemplate) return withAutoAssignmentGroupKey({ ...item.entryTemplate, '星期': day, '節次': period }, item.lesson);
+       return withAutoAssignmentGroupKey({
         '課表ID': 'AUTO_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
         '班級代碼': String(item.lesson.classCode),
         '星期': day,
@@ -10384,9 +10643,9 @@ async function executeAutoScheduleCore(runOptions = {}) {
         '科目代碼': String(item.lesson.subjectCode),
         '教師姓名': autoTeacherValue(item.lesson),
         '課堂屬性': getAutoScheduleAttribute(item.lesson, day, period, localSchedule, buildScheduleLookup(localSchedule)),
-        '是否鎖定': 'FALSE'
-      };
-    }
+         '是否鎖定': 'FALSE'
+       }, item.lesson);
+     }
 
     function collectDirectEvictionOptions(lesson, day, period, allowOptional, providedLookup = null, useReserve = false) {
       if (consumeRepairOperation(useReserve)) return [];
@@ -10845,17 +11104,17 @@ async function executeAutoScheduleCore(runOptions = {}) {
               workingSchedule,
               lookup
             )) continue;
-            const entry = item.entryTemplate
-              ? { ...item.entryTemplate, '星期': candidate.day, '節次': candidate.period }
-              : {
+             const entry = withAutoAssignmentGroupKey(item.entryTemplate
+               ? { ...item.entryTemplate, '星期': candidate.day, '節次': candidate.period }
+               : {
                 '班級代碼': String(item.lesson.classCode),
                 '星期': candidate.day,
                 '節次': candidate.period,
                 '科目代碼': String(item.lesson.subjectCode),
                  '教師姓名': autoTeacherValue(item.lesson),
                  '課堂屬性': getAutoScheduleAttribute(item.lesson, candidate.day, candidate.period, workingSchedule, lookup),
-                 '是否鎖定': 'FALSE'
-              };
+                  '是否鎖定': 'FALSE'
+               }, item.lesson);
             workingSchedule.push(entry);
             assignedSlots.add(slotKey);
             assignedEntries.push({ item, day: candidate.day, period: candidate.period });
@@ -11060,17 +11319,17 @@ async function executeAutoScheduleCore(runOptions = {}) {
         for (const candidate of candidates) {
           if (consumeRepairOperation(true)) return false;
           if (!isSlotValid(item.lesson.classCode, item.lesson.subjectCode, autoTeacherInput(item.lesson), candidate.day, candidate.period, workingSchedule, lookup)) continue;
-          const entry = item.entryTemplate
-            ? { ...item.entryTemplate, '星期': candidate.day, '節次': candidate.period }
-            : {
+           const entry = withAutoAssignmentGroupKey(item.entryTemplate
+             ? { ...item.entryTemplate, '星期': candidate.day, '節次': candidate.period }
+             : {
               '班級代碼': String(item.lesson.classCode),
               '星期': candidate.day,
               '節次': candidate.period,
               '科目代碼': String(item.lesson.subjectCode),
                '教師姓名': autoTeacherValue(item.lesson),
                '課堂屬性': getAutoScheduleAttribute(item.lesson, candidate.day, candidate.period, workingSchedule, lookup),
-               '是否鎖定': 'FALSE'
-            };
+                '是否鎖定': 'FALSE'
+             }, item.lesson);
           workingSchedule.push(entry);
           assignedEntries.push({ item, day: candidate.day, period: candidate.period });
           if (search(depth + 1)) return true;
@@ -11373,17 +11632,19 @@ async function executeAutoScheduleCore(runOptions = {}) {
       const teacherCodes = getAutoTeacherCodes(entry);
       const teacherCode = teacherCodes[0] || String(entry['教師姓名'] || '');
       const subject = idx.subjectByCode[subjectCode];
-      const totalWeekly = weeklyTargetByClassSubject.get(classCode + '|' + subjectCode) || 1;
+      const assignmentGroupKey = getAutoAssignmentGroupKey(entry);
+      const totalWeekly = weeklyTargetByAssignmentGroup.get(assignmentGroupKey) || weeklyTargetByClassSubject.get(classCode + '|' + subjectCode) || 1;
       return {
         classCode,
         subjectCode,
+        assignmentGroupKey,
         teacherCode,
         teacherCodes,
         teacherValue: teacherCodes.length > 1 ? teacherCodes : teacherCode,
          totalWeekly,
          weeklyUnit: isAlternateWeekScheduleEntry(entry) ? 0.5 : 1,
-         isAlternateWeek: isAlternateWeekScheduleEntry(entry) || isAlternateClassSubject(classCode, subjectCode),
-         isP8Lesson: isAlternateWeekScheduleEntry(entry) || isAlternateClassSubject(classCode, subjectCode) || isHelperSubjectCode(subjectCode),
+          isAlternateWeek: isAlternateWeekScheduleEntry(entry) || isAlternateClassSubject(classCode, subjectCode, teacherCodes, assignmentGroupKey),
+          isP8Lesson: isAlternateWeekScheduleEntry(entry) || isAlternateClassSubject(classCode, subjectCode, teacherCodes, assignmentGroupKey) || isHelperSubjectCode(subjectCode),
          weekType: isAlternateWeekScheduleEntry(entry) ? String(entry['課堂屬性'] || '').trim() : '',
          maxConsecDays: parseSubjectMaxConsecutiveDays(subject),
         isVirtual: String(entry['課堂屬性'] || '') === '抽離',
@@ -11752,10 +12013,10 @@ async function executeAutoScheduleCore(runOptions = {}) {
         if (mandatoryRules.length > 0 && !mandatoryRules.some(item => item.slots.some(slot => slot.day === day && slot.period === period))) {
           addBlocker(blockers, '不在必排時段');
         }
-        if (!canPlaceClassSubjectOnDay(lesson.classCode, subjectCode, day, localSchedule, failureLookup)) {
+         if (!canPlaceClassSubjectOnDay(lesson.classCode, subjectCode, day, localSchedule, failureLookup, '', lesson.assignmentGroupKey)) {
           addBlocker(blockers, '同班同科同日限制');
         }
-        if (!canPlaceSubjectWithinMaxConsecutiveDays(lesson.classCode, subjectCode, day, localSchedule, failureLookup)) {
+         if (!canPlaceSubjectWithinMaxConsecutiveDays(lesson.classCode, subjectCode, day, localSchedule, failureLookup, lesson.assignmentGroupKey)) {
           addBlocker(blockers, '科目連日限制');
         }
         if (optTeacherConsec) {

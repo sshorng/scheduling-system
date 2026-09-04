@@ -375,6 +375,33 @@ async function main() {
     }
     console.log('PASS  0.5 配課自動排課依序使用單週與雙週');
   }
+  // 情境 10：同班同科但備註不同的兩組配課，必須各自套用每日分散規則
+  {
+    const data = baseData();
+    data.assignments.push(
+      { '配課ID': 'A_GROUP_A', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T1', '每週節數': '3', '備註': 'A組' },
+      { '配課ID': 'A_GROUP_B', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T2', '每週節數': '3', '備註': 'B組' }
+    );
+    const result = await runAndReport('assignment-groups', data);
+    const rows = result.schedule.filter(entry => String(entry['班級代碼']) === '701' && String(entry['科目代碼']) === '英語');
+    assertSame(rows.length, 6, '不同備註配課不應被合併後套用同一個每日分散限制');
+    assertSame(rows.filter(entry => String(entry['教師姓名']) === 'T1').length, 3, 'A組配課未完整排入');
+    assertSame(rows.filter(entry => String(entry['教師姓名']) === 'T2').length, 3, 'B組配課未完整排入');
+    const slots = rows.map(entry => String(entry['星期']) + '-' + String(entry['節次']) + '-' + String(entry['課堂屬性'] || '全週'));
+    if (new Set(slots).size !== rows.length) throw new Error('同班同科不同組被排入同一時段');
+    const internalGroupKeys = new Set(rows.map(entry => String(entry.__assignmentGroupKey || '')));
+    if (!internalGroupKeys.has('701|英語|A組') || !internalGroupKeys.has('701|英語|B組')) throw new Error('自動排課課表 entry 未保留正確分組識別');
+    if (Object.keys(rows[0]).includes('__assignmentGroupKey')) throw new Error('分組識別不應污染課表資料 schema');
+    const ambiguousData = baseData();
+    ambiguousData.assignments.push(
+      { '配課ID': 'A_AMBIGUOUS_A', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T1', '每週節數': '1', '備註': 'A組' },
+      { '配課ID': 'A_AMBIGUOUS_B', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T1', '每週節數': '1', '備註': 'B組' }
+    );
+    const ambiguousContext = buildContext(ambiguousData);
+    const warnings = vm.runInContext('getAssignmentGroupWarnings(state.assignments)', ambiguousContext);
+    if (!Array.isArray(warnings) || warnings.length !== 1) throw new Error('相同教師集合的不同備註未產生分組歧義警告');
+    console.log('PASS  同班同科不同備註配課分組獨立排課');
+  }
 }
 
 function parseTeacherCodes(value) {

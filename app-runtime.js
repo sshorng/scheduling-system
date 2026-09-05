@@ -39,8 +39,10 @@
   };
   const runtimeScheduleEntryMatchesAssignment = (entry, assignment) => {
     if (typeof scheduleEntryMatchesAssignment === 'function') return scheduleEntryMatchesAssignment(entry, assignment);
+    const storedNote = String(entry?.['備註'] || '').trim();
     return String(entry?.['班級代碼'] || '').trim() === String(assignment?.['班級代碼'] || '').trim() &&
       String(entry?.['科目代碼'] || '').trim() === String(assignment?.['科目代碼'] || '').trim() &&
+      (!storedNote || storedNote === String(assignment?.['備註'] || '').trim()) &&
       runtimeAssignmentTeacherSignature(entry) === runtimeAssignmentTeacherSignature(assignment);
   };
   const runtimeAssignmentGroupKeysForScheduleEntry = (entry, assignments = state.assignments) => {
@@ -58,35 +60,10 @@
     return candidates.length === 1 ? [runtimeAssignmentGroupKey(candidates[0])] : [];
   };
   const runtimeAssignmentGroupConflict = (candidate, assignments = state.assignments) => {
-    if (typeof getAssignmentGroupConflict === 'function') return getAssignmentGroupConflict(candidate, assignments);
-    const signature = runtimeAssignmentTeacherSignature(candidate);
-    if (!signature) return null;
-    const candidateId = String(candidate?.['配課ID'] || '').trim();
-    const classCode = String(candidate?.['班級代碼'] || '').trim();
-    const subjectCode = String(candidate?.['科目代碼'] || '').trim();
-    const note = String(candidate?.['備註'] || '').trim();
-    return (Array.isArray(assignments) ? assignments : []).find(assignment =>
-      String(assignment['配課ID'] || '').trim() !== candidateId &&
-      String(assignment['班級代碼'] || '').trim() === classCode &&
-      String(assignment['科目代碼'] || '').trim() === subjectCode &&
-      String(assignment['備註'] || '').trim() !== note &&
-      runtimeAssignmentTeacherSignature(assignment) === signature
-    ) || null;
+    return null;
   };
   const runtimeAssignmentGroupWarnings = assignments => {
-    if (typeof getAssignmentGroupWarnings === 'function') return getAssignmentGroupWarnings(assignments);
-    const grouped = new Map();
-    (Array.isArray(assignments) ? assignments : []).forEach(assignment => {
-      const note = runtimeAssignmentGroupLabel(assignment);
-      const signature = runtimeAssignmentTeacherSignature(assignment);
-      if (!note || !signature) return;
-      const key = String(assignment['班級代碼'] || '').trim() + '|' + String(assignment['科目代碼'] || '').trim() + '|' + signature;
-      if (!grouped.has(key)) grouped.set(key, new Set());
-      grouped.get(key).add(note);
-    });
-    return [...grouped.entries()]
-      .filter(([, notes]) => notes.size > 1)
-      .map(([key, notes]) => '同班同科不同備註使用相同教師集合：' + key + '（' + [...notes].join('、') + '）');
+    return [];
   };
 
   const isHelperSubjectCodeForCount = value => /輔$/i.test(String(value || '').trim());
@@ -102,6 +79,8 @@
       if (typeof scheduleEntryMatchesAssignment === 'function') return scheduleEntryMatchesAssignment(entry, assignment);
       if (String(entry?.['班級代碼'] || '').trim() !== String(assignment?.['班級代碼'] || '').trim() ||
           String(entry?.['科目代碼'] || '').trim() !== String(assignment?.['科目代碼'] || '').trim()) return false;
+      const storedNote = String(entry?.['備註'] || '').trim();
+      if (storedNote && storedNote !== String(assignment?.['備註'] || '').trim()) return false;
       const entryCodes = typeof getCellTeacherCodes === 'function'
         ? getCellTeacherCodes(entry).map(code => String(code || '').trim()).filter(Boolean)
         : String(entry?.['教師姓名'] || '').split(/[,，、;；]/).map(code => code.trim()).filter(Boolean);
@@ -124,20 +103,7 @@
       return candidates.length === 1 ? [groupKeyOf(candidates[0])] : [];
     };
     const groupWarningsOf = assignments => {
-      const grouped = new Map();
-      (Array.isArray(assignments) ? assignments : []).forEach(assignment => {
-        const note = String(assignment?.['備註'] || '').trim();
-        const signature = typeof getCellTeacherCodes === 'function'
-          ? [...new Set(getCellTeacherCodes(assignment).map(code => String(code || '').trim()).filter(Boolean))].sort().join('|')
-          : String(assignment?.['教師姓名'] || '').split(/[,，、;；]/).map(code => code.trim()).filter(Boolean).sort().join('|');
-        if (!note || !signature) return;
-        const key = String(assignment?.['班級代碼'] || '').trim() + '|' + String(assignment?.['科目代碼'] || '').trim() + '|' + signature;
-        if (!grouped.has(key)) grouped.set(key, new Set());
-        grouped.get(key).add(note);
-      });
-      return [...grouped.entries()]
-        .filter(([, notes]) => notes.size > 1)
-        .map(([key, notes]) => '同班同科不同備註使用相同教師集合：' + key + '（' + [...notes].join('、') + '）');
+      return [];
     };
     baseBuildIndex();
     idx.homeroomTeacherByClass = Object.create(null);
@@ -433,17 +399,12 @@
        ...(existing || {}),
        '配課ID': id,
        '班級代碼': cls,
-      '科目代碼': sub,
-      '教師姓名': teacher,
-      '課程屬性': get('courseAttr'),
+       '科目代碼': sub,
+       '教師姓名': teacher,
+       '課程屬性': get('courseAttr'),
        '每週節數': weekly,
        '備註': get('note')
      };
-     const groupConflict = typeof runtimeAssignmentGroupConflict === 'function' ? runtimeAssignmentGroupConflict(data) : null;
-     if (groupConflict) {
-       toast('同班同科不同備註不可使用相同教師集合，否則課表回讀時無法辨識分組', 'warning');
-       return;
-     }
      bgSync({
       actionName: '儲存配課資料',
       applyLocal: () => {
@@ -994,20 +955,15 @@
       ? state.assignments.find(assignment => String(assignment['配課ID'] || '') === target.assignmentId)
       : null;
      const data = {
-      ...(existing || {}),
-      '配課ID': existing?.['配課ID'] || ('MATRIX-' + Date.now()),
-      '班級代碼': target.classCode,
-      '科目代碼': target.subjectCode,
-      '教師姓名': teacherValue,
-      '課程屬性': String(document.getElementById('matrixAssignmentAttribute')?.value || '').trim(),
+       ...(existing || {}),
+       '配課ID': existing?.['配課ID'] || ('MATRIX-' + Date.now()),
+       '班級代碼': target.classCode,
+       '科目代碼': target.subjectCode,
+       '教師姓名': teacherValue,
+       '課程屬性': String(document.getElementById('matrixAssignmentAttribute')?.value || '').trim(),
        '每週節數': weekly,
        '備註': String(document.getElementById('matrixAssignmentNote')?.value || '').trim()
      };
-     const groupConflict = typeof runtimeAssignmentGroupConflict === 'function' ? runtimeAssignmentGroupConflict(data) : null;
-     if (groupConflict) {
-       toast('同班同科不同備註不可使用相同教師集合，否則課表回讀時無法辨識分組', 'warning');
-       return;
-     }
      const assignmentId = String(data['配課ID']);
     const actionName = existing ? '修改配課資料' : '新增配課資料';
     window.closeMatrixAssignmentEditor();

@@ -11,8 +11,8 @@
 
 // ===================== 工作表定義 =====================
 
-const GAS_VERSION = '20260826_v1212_export_excludes_preplanned';
-const SCHEMA_VERSION = '20260826_bilingual_course_v5';
+const GAS_VERSION = '20260905_v1213_schedule_notes';
+const SCHEMA_VERSION = '20260905_schedule_note_v1';
 
 // 所有會改動試算表的動作共用同一把 ScriptLock，避免多視窗或快速連點互相覆寫。
 const LOCKED_WRITE_ACTIONS = new Set([
@@ -40,7 +40,7 @@ const SHEET_DEFS = {
     key: '配課ID'
   },
   '課表': {
-    headers: ['課表ID', '班級代碼', '星期', '節次', '科目代碼', '教師姓名', '課堂屬性', '是否鎖定'],
+    headers: ['課表ID', '班級代碼', '星期', '節次', '科目代碼', '教師姓名', '課堂屬性', '是否鎖定', '備註'],
     key: '課表ID'
   },
   '不排課': {
@@ -561,7 +561,7 @@ function scheduleRevision_(rows) {
   const normalized = (rows || []).map(row => JSON.stringify([
     String(row['課表ID'] || ''), String(row['班級代碼'] || ''), String(row['星期'] || ''),
     String(row['節次'] || ''), String(row['科目代碼'] || ''), String(row['教師姓名'] || ''),
-    String(row['課堂屬性'] || ''), String(row['是否鎖定'] || '')
+    String(row['課堂屬性'] || ''), String(row['是否鎖定'] || ''), String(row['備註'] || '')
   ])).sort();
   const text = normalized.join('');
   let hash = 2166136261;
@@ -702,6 +702,8 @@ function scheduleMatchesAssignment_(row, assignment) {
   if (!row || !assignment ||
       String(row['班級代碼'] || '').trim() !== String(assignment['班級代碼'] || '').trim() ||
       String(row['科目代碼'] || '').trim() !== String(assignment['科目代碼'] || '').trim()) return false;
+  const rowNote = String(row['備註'] || '').trim();
+  if (rowNote && rowNote !== String(assignment['備註'] || '').trim()) return false;
   const rowTeachers = teacherCodesFromValue_(row['教師姓名']);
   const assignmentTeachers = teacherCodesFromValue_(assignment['教師姓名']);
   return assignmentTeachers.length === 0 || assignmentTeachers.some(code => rowTeachers.indexOf(code) >= 0);
@@ -767,7 +769,8 @@ function checkConflicts_(ss, p, excludeId, preloaded) {
     scheduleMatchesAssignment_({
       '班級代碼': p.classCode,
       '科目代碼': subjectCode,
-      '教師姓名': p.teacherCode
+      '教師姓名': p.teacherCode,
+      '備註': p.assignmentNote
     }, assignment) && assignmentIsAlternateWeek_(assignment, subjectByCode)
   );
   const requestedWeekType = periodN === 8
@@ -1042,6 +1045,8 @@ function scheduleAssignmentNoteForRow_(row, assignments) {
   const classCode = String(row && row['班級代碼'] || '').trim();
   const subjectCode = String(row && row['科目代碼'] || '').trim();
   if (!classCode || !subjectCode) return '';
+  const storedNote = String(row && row['備註'] || '').trim();
+  if (storedNote) return storedNote;
   const notes = (assignments || [])
     .filter(assignment =>
       String(assignment['班級代碼'] || '').trim() === classCode &&
@@ -1144,7 +1149,8 @@ function updateCell_(ss, p) {
     '星期': dayN, '節次': periodN,
     '科目代碼': String(p.subjectCode || ''), '教師姓名': teacherTc,
     '課堂屬性': attr,
-    '是否鎖定': p.isLocked ? 'TRUE' : 'FALSE'
+    '是否鎖定': p.isLocked ? 'TRUE' : 'FALSE',
+    '備註': String(p.assignmentNote || '').trim()
   };
 
   const values = headers.map(h => newRow[h] !== undefined ? newRow[h] : '');
@@ -2091,10 +2097,11 @@ function savePatrolSchedule_(ss, payload) {
          parseInt(row['星期'], 10),
          parseInt(row['節次'], 10),
           String(row['科目代碼'] || ''),
-          Array.isArray(row['教師姓名']) ? JSON.stringify(row['教師姓名']) : String(row['教師姓名'] || ''),
-          String(row['課堂屬性'] || '一般'),
-          row['是否鎖定'] === 'TRUE' || row['是否鎖定'] === true ? 'TRUE' : 'FALSE'
-        ]);
+           Array.isArray(row['教師姓名']) ? JSON.stringify(row['教師姓名']) : String(row['教師姓名'] || ''),
+           String(row['課堂屬性'] || '一般'),
+           row['是否鎖定'] === 'TRUE' || row['是否鎖定'] === true ? 'TRUE' : 'FALSE',
+           String(row['備註'] || '')
+         ]);
       sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
     }
     const savedRows = sheetToObjects_(sheet);
@@ -2584,10 +2591,11 @@ function frozenScheduleEntryMatches_(before, after) {
   return String(beforeRow['班級代碼'] || '') === String(afterRow['班級代碼'] || '') &&
     String(beforeRow['科目代碼'] || '') === String(afterRow['科目代碼'] || '') &&
     frozenTeacherValue_(beforeRow['教師姓名']) === frozenTeacherValue_(afterRow['教師姓名']) &&
-    parseInt(beforeRow['星期'], 10) === parseInt(afterRow['星期'], 10) &&
-     parseInt(beforeRow['節次'], 10) === parseInt(afterRow['節次'], 10) &&
-     String(beforeRow['課堂屬性'] || '一般') === String(afterRow['課堂屬性'] || '一般') &&
-     String(beforeRow['是否鎖定'] || '').toUpperCase() === String(afterRow['是否鎖定'] || '').toUpperCase();
+      parseInt(beforeRow['星期'], 10) === parseInt(afterRow['星期'], 10) &&
+      parseInt(beforeRow['節次'], 10) === parseInt(afterRow['節次'], 10) &&
+      String(beforeRow['課堂屬性'] || '一般') === String(afterRow['課堂屬性'] || '一般') &&
+      String(beforeRow['備註'] || '') === String(afterRow['備註'] || '') &&
+      String(beforeRow['是否鎖定'] || '').toUpperCase() === String(afterRow['是否鎖定'] || '').toUpperCase();
 }
 
 function scheduleRowSlotKey_(row) {
@@ -3120,11 +3128,12 @@ function batchUpdateScheduleLocked_(ss, payload) {
       String(r['班級代碼'] || ''),
       parseInt(r['星期'], 10),
       period,
-      String(r['科目代碼'] || ''),
-      (Array.isArray(r['教師姓名']) ? JSON.stringify(r['教師姓名']) : String(r['教師姓名'] || '')),
-      attr,
-      (r['是否鎖定'] === 'TRUE' || r['是否鎖定'] === true) ? 'TRUE' : 'FALSE'
-    ];
+       String(r['科目代碼'] || ''),
+       (Array.isArray(r['教師姓名']) ? JSON.stringify(r['教師姓名']) : String(r['教師姓名'] || '')),
+       attr,
+       (r['是否鎖定'] === 'TRUE' || r['是否鎖定'] === true) ? 'TRUE' : 'FALSE',
+       String(r['備註'] || '')
+     ];
   });
 
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);

@@ -39,7 +39,7 @@ function getAssignmentWeeklyValue(assignment, subject = null, fallback = 3) {
   return getSubjectWeeklyValue(subject || idx?.subjectByCode?.[String(assignment?.['科目代碼'] || '').trim()], fallback);
 }
 
-// 同班同科可有多筆配課；備註是目前不新增欄位時的分組識別。
+// 同班同科可有多筆配課；備註同步寫入課表，作為分組識別。
 function getAssignmentGroupKey(assignment) {
   if (!assignment) return '';
   return String(assignment['班級代碼'] || '').trim() + '|' +
@@ -66,6 +66,8 @@ function scheduleEntryMatchesAssignment(entry, assignment) {
   if (!entry || !assignment) return false;
   if (String(entry['班級代碼'] || '').trim() !== String(assignment['班級代碼'] || '').trim()) return false;
   if (String(entry['科目代碼'] || '').trim() !== String(assignment['科目代碼'] || '').trim()) return false;
+  const storedNote = String(entry['備註'] || '').trim();
+  if (storedNote && storedNote !== String(assignment['備註'] || '').trim()) return false;
   return assignmentTeacherSetsMatch(entry, assignment);
 }
 
@@ -79,7 +81,11 @@ function getAssignmentGroupKeysForScheduleEntry(entry, assignments = state.assig
     String(assignment['班級代碼'] || '').trim() === classCode &&
     String(assignment['科目代碼'] || '').trim() === subjectCode
   );
-  const exact = candidates.filter(assignment => scheduleEntryMatchesAssignment(entry, assignment));
+  const storedNote = String(entry?.['備註'] || '').trim();
+  const exact = candidates.filter(assignment =>
+    (!storedNote || String(assignment['備註'] || '').trim() === storedNote) &&
+    scheduleEntryMatchesAssignment(entry, assignment)
+  );
   if (exact.length > 0) return [...new Set(exact.map(getAssignmentGroupKey).filter(Boolean))];
   return candidates.length === 1 ? [getAssignmentGroupKey(candidates[0])] : [];
 }
@@ -97,42 +103,11 @@ function buildAutoScheduleEntriesByAssignmentGroup(schedule, assignments) {
 }
 
 function getAssignmentGroupConflict(candidate, assignments = state.assignments) {
-  const signature = getAssignmentTeacherSignature(candidate);
-  if (!signature) return null;
-  const candidateClass = String(candidate?.['班級代碼'] || '').trim();
-  const candidateSubject = String(candidate?.['科目代碼'] || '').trim();
-  const candidateNote = String(candidate?.['備註'] || '').trim();
-  const candidateId = String(candidate?.['配課ID'] || '').trim();
-  return (Array.isArray(assignments) ? assignments : []).find(assignment =>
-    String(assignment['配課ID'] || '').trim() !== candidateId &&
-    String(assignment['班級代碼'] || '').trim() === candidateClass &&
-    String(assignment['科目代碼'] || '').trim() === candidateSubject &&
-    String(assignment['備註'] || '').trim() !== candidateNote &&
-    getAssignmentTeacherSignature(assignment) === signature
-  ) || null;
+  return null;
 }
 
 function getAssignmentGroupWarnings(assignments = state.assignments) {
-  const warnings = [];
-  const seen = new Set();
-  const grouped = new Map();
-  (Array.isArray(assignments) ? assignments : []).forEach(assignment => {
-    const classCode = String(assignment['班級代碼'] || '').trim();
-    const subjectCode = String(assignment['科目代碼'] || '').trim();
-    const note = String(assignment['備註'] || '').trim();
-    const signature = getAssignmentTeacherSignature(assignment);
-    if (!classCode || !subjectCode || !note || !signature) return;
-    const key = classCode + '|' + subjectCode + '|' + signature;
-    if (!grouped.has(key)) grouped.set(key, new Set());
-    grouped.get(key).add(note);
-  });
-  grouped.forEach((notes, key) => {
-    if (notes.size < 2 || seen.has(key)) return;
-    seen.add(key);
-    const [classCode, subjectCode, ...signature] = key.split('|');
-    warnings.push('同班同科不同備註使用相同教師集合：' + classCode + '／' + subjectCode + '（' + [...notes].join('、') + '；教師 ' + signature.join('、') + '）');
-  });
-  return warnings;
+  return [];
 }
 
 function isPreplannedCourse(value) {
@@ -1113,7 +1088,7 @@ function compressSlots(slots) {
 // GAS URL（契約 §3.C 三層優先序）
 // ============================================================
 const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycby8i5bnQ-oKZMO1HUQO6pJF6f_XQL8bQHO2Yj3nJ2D7NCzNZbe_bhks8hxTVZWWSxz7/exec";  // 已鎖定部署網址
-const FRONTEND_VERSION = '20260826_v1212_export_excludes_preplanned';
+const FRONTEND_VERSION = '20260905_v1213_schedule_notes';
 
 function resolveGasUrl() {
   if (DEFAULT_GAS_URL && DEFAULT_GAS_URL.trim()) return DEFAULT_GAS_URL.trim();
@@ -3140,6 +3115,8 @@ function getScheduleAssignmentMatches(cell) {
 }
 
 function getScheduleAssignmentNote(cell) {
+  const storedNote = String(cell?.['備註'] || '').trim();
+  if (storedNote) return storedNote;
   const matches = getScheduleAssignmentMatches(cell);
   const notes = [...new Set(matches
     .map(item => String(item['備註'] || '').trim())
@@ -4523,7 +4500,7 @@ function getTeacherForClassSubject(cls, subjectCode, defaultTcInfo) {
 }
 
 // 1. 樂觀單格指派／更新（綁班強制連動）
-function optimisticUpdateCell({ classCode, day, period, subjectCode, teacherCode, teacherList, attr = '一般', isLocked = false, isOvertime = false, force = false }) {
+function optimisticUpdateCell({ classCode, day, period, subjectCode, teacherCode, teacherList, assignmentNote = '', attr = '一般', isLocked = false, isOvertime = false, force = false }) {
   const dayNum = parseInt(day, 10);
   const perNum = parseInt(period, 10);
   const finalAttr = isOvertime
@@ -4540,7 +4517,7 @@ function optimisticUpdateCell({ classCode, day, period, subjectCode, teacherCode
     tl = single ? normalizeTeacherList([single]) : [];
   }
   focusTeacherAfterManualAssignment(tl[0]?.['教師姓名'] || '');
-  const requestedAssignmentNote = String(arguments[0]?.assignmentNote || '').trim();
+  const requestedAssignmentNote = String(assignmentNote || '').trim();
   const resolveAssignmentNote = cell => typeof getScheduleAssignmentNote === 'function'
     ? getScheduleAssignmentNote(cell)
     : String(cell?.['備註'] || '').trim();
@@ -4664,14 +4641,16 @@ function optimisticUpdateCell({ classCode, day, period, subjectCode, teacherCode
       existing['教師姓名'] = unifiedVal;
       existing['課堂屬性'] = memberAttr;
       existing['是否鎖定'] = isLocked ? 'TRUE' : 'FALSE';
+      existing['備註'] = memberNote;
     } else {
       const newCell = {
         '課表ID': 'S_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
         '班級代碼': String(cls), '星期': dayNum, '節次': perNum,
-         '科目代碼': memberSubject, '教師姓名': unifiedVal,
-         '課堂屬性': memberAttr,
-         '是否鎖定': isLocked ? 'TRUE' : 'FALSE'
-       };
+        '科目代碼': memberSubject, '教師姓名': unifiedVal,
+        '課堂屬性': memberAttr,
+        '是否鎖定': isLocked ? 'TRUE' : 'FALSE',
+        '備註': memberNote
+      };
       state.schedule.push(newCell);
     }
     return true;
@@ -4899,15 +4878,16 @@ function optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcW
   const destinationAssignmentNote = getScheduleAssignmentNote(srcCell);
   const sourceAssignmentNote = destinationAssignmentNote;
   const cellObj = {
-      '課表ID': 'S_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-      '班級代碼': String(dstCls),
-      '星期': dstD,
-      '節次': dstP,
-      '科目代碼': subjectCode,
-      '教師姓名': tListSrc.length > 1 ? JSON.stringify(tListSrc) : String(srcCell['教師姓名'] || ''),
-      '課堂屬性': targetAttr,
-      '是否鎖定': 'FALSE'
-   };
+    '課表ID': 'S_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+    '班級代碼': String(dstCls),
+    '星期': dstD,
+    '節次': dstP,
+    '科目代碼': subjectCode,
+    '教師姓名': tListSrc.length > 1 ? JSON.stringify(tListSrc) : String(srcCell['教師姓名'] || ''),
+    '課堂屬性': targetAttr,
+    '是否鎖定': 'FALSE',
+    '備註': destinationAssignmentNote
+  };
   state.schedule.push(cellObj);
 
   buildIndex();

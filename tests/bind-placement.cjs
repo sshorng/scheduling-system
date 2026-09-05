@@ -375,7 +375,7 @@ async function main() {
     }
     console.log('PASS  0.5 配課自動排課依序使用單週與雙週');
   }
-  // 情境 10：同班同科但備註不同的兩組配課，必須各自套用每日分散規則
+  // 情境 10：同班同科但備註不同的兩組配課，必須各自套用每日分散規則；相同教師也可建立。
   {
     const data = baseData();
     data.assignments.push(
@@ -403,7 +403,9 @@ async function main() {
     );
     const ambiguousContext = buildContext(ambiguousData);
     const warnings = vm.runInContext('getAssignmentGroupWarnings(state.assignments)', ambiguousContext);
-    if (!Array.isArray(warnings) || warnings.length !== 1) throw new Error('相同教師集合的不同備註未產生分組歧義警告');
+    if (!Array.isArray(warnings) || warnings.length !== 0) throw new Error('相同教師集合的不同備註不應再產生分組歧義警告');
+    const conflict = vm.runInContext('getAssignmentGroupConflict(state.assignments[0], state.assignments)', ambiguousContext);
+    if (conflict) throw new Error('相同教師集合的不同備註仍被分組防呆阻擋');
     console.log('PASS  同班同科不同備註配課分組獨立排課');
   }
 }

@@ -722,7 +722,7 @@ check('Manual exclusive conflict can be force-placed', () => {
   if (!classBlock.includes('Boolean(teacherDropForce || canMove.force)')) throw new Error('class move force flag is not forwarded');
   if (!classBlock.includes('cellTeacherList.map')) throw new Error('班級課表未顯示主／協同教師');
 
-    if (!app.includes('function optimisticUpdateCell({ classCode, day, period, subjectCode, teacherCode, teacherList, attr = \'一般\', isLocked = false, isOvertime = false, force = false })')) throw new Error('single-cell force parameter missing');
+   if (!app.includes('function optimisticUpdateCell({ classCode, day, period, subjectCode, teacherCode, teacherList, assignmentNote = \'\', attr = \'一般\', isLocked = false, isOvertime = false, force = false })')) throw new Error('single-cell force parameter missing');
    if (!app.includes('function optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcWeek, dstWeek, force = false)')) throw new Error('move force parameter missing');
    if (!app.includes('allowManualConstraintWarnings: force')) throw new Error('manual batch writes do not pass the general force flag');
    const updateStart = backend.indexOf('function updateCell_');
@@ -805,7 +805,7 @@ check('Subject relation soft rule is wired end to end', () => {
   if (!backend.includes("'科目關係':")) throw new Error('subject relation sheet definition missing');
   if (!backend.includes("headers: ['規則ID', '科目A', '科目B', '適用年級', '適用班級', '備註']")) throw new Error('subject relation schema missing');
   if (!backend.includes("subjectRelations:   sheetToObjects_(ss.getSheetByName('科目關係'))")) throw new Error('getAll does not return subject relations');
-  if (!backend.includes("const GAS_VERSION = '20260826_v1212_export_excludes_preplanned';")) throw new Error('GAS version marker missing');
+   if (!backend.includes("const GAS_VERSION = '20260905_v1213_schedule_notes';")) throw new Error('GAS version marker missing');
   if (!backend.includes('function saveSubjectRelation_(ss, p)')) throw new Error('atomic subject relation save missing');
   if (!backend.includes("case 'saveSubjectRelation': result = saveSubjectRelation_(ss, payload); break;")) throw new Error('subject relation save route missing');
   for (const marker of [
@@ -863,7 +863,7 @@ check('Subject relation warning respects class scope', () => {
   if (context.getSubjectRelationWarnings(2, '國文', '701', schedule).length !== 1) throw new Error('綁班不應停用同班科目關係');
 });
 check('Frontend and backend versions use a handshake', () => {
-  if (!app.includes("const FRONTEND_VERSION = '20260826_v1212_export_excludes_preplanned';")) throw new Error('frontend version marker missing');
+   if (!app.includes("const FRONTEND_VERSION = '20260905_v1213_schedule_notes';")) throw new Error('frontend version marker missing');
   if (!app.includes('res.data.gasVersion')) throw new Error('frontend does not read GAS version');
   if (!app.includes('前後端版本不同')) throw new Error('version mismatch warning missing');
   if (!backend.includes('gasVersion:          GAS_VERSION')) throw new Error('GAS getAll version missing');
@@ -1364,6 +1364,15 @@ check('Batch assignment replaces weekly hours, teacher, and notes', () => {
   if (!app.includes('更新後每週節數')) throw new Error('batch hours label still describes accumulation');
    if (!app.includes('batch-co-teacher-input') || !app.includes('batch-co-teacher-tag-input') || !app.includes('buildBatchTeacherValue')) throw new Error('批次配課協同教師語言欄位缺少');
   if (app.includes('本次新增節數') || app.includes('會累加')) throw new Error('batch UI still exposes accumulation wording');
+ });
+check('Manual grouped assignments use persisted notes without a same-teacher guard', () => {
+  const blockedMessage = '同班同科不同備註不可使用相同教師集合';
+  if (app.includes(blockedMessage) || runtime.includes(blockedMessage)) throw new Error('同一教師分組防呆仍殘留');
+  if (runtime.includes('runtimeAssignmentGroupConflict(data)')) throw new Error('行內配課仍呼叫相同教師分組防呆');
+  if (runtime.includes('assignmentGroupConflict(data)')) throw new Error('矩陣配課仍呼叫相同教師分組防呆');
+  if (!app.includes("'備註': memberNote")) throw new Error('手動課表寫入未保存分組備註');
+  if (!app.includes('assignmentNote: requestedAssignmentNote')) throw new Error('單格課表同步未傳送分組備註');
+  if (!backend.includes("'備註': String(p.assignmentNote || '').trim()")) throw new Error('GAS 單格課表寫入未保存分組備註');
 });
 
 check('Teacher timetable drag preserves source class', () => {
@@ -2356,8 +2365,34 @@ check('Backend snapshot audit checks every assigned teacher', () => {
     blockGroups: [{ '群組ID': 'BG1', '科目清單': '英語', '班級清單': '701,702' }],
     teacherExclusives: [], rooms: []
   });
-  if (!combined || !combined.ok) throw new Error('GAS snapshot audit incorrectly rejected configured combined class cohort');
-  const sameClassSubjectDay = context.validateScheduleSnapshot_([
+   if (!combined || !combined.ok) throw new Error('GAS snapshot audit incorrectly rejected configured combined class cohort');
+   const groupedAssignments = [
+     { '配課ID': 'GA', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T01', '備註': 'A組' },
+     { '配課ID': 'GB', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T02', '備註': 'B組' }
+   ];
+   const groupedRows = [
+     { '課表ID': 'GA-S', '班級代碼': '701', '星期': '1', '節次': '1', '科目代碼': '英語', '教師姓名': 'T01', '課堂屬性': '一般', '備註': 'A組' },
+     { '課表ID': 'GB-S', '班級代碼': '701', '星期': '1', '節次': '1', '科目代碼': '英語', '教師姓名': 'T02', '課堂屬性': '一般', '備註': 'B組' }
+   ];
+   if (context.scheduleAssignmentNoteForRow_(groupedRows[0], groupedAssignments) !== 'A組' ||
+       context.scheduleAssignmentNoteForRow_(groupedRows[1], groupedAssignments) !== 'B組') {
+     throw new Error('課表儲存備註未優先識別分組');
+   }
+   if (context.scheduleAssignmentScopeKey_(groupedRows[0], groupedAssignments) !== 'assignment:701|英語|A組' ||
+       context.scheduleAssignmentScopeKey_(groupedRows[1], groupedAssignments) !== 'assignment:701|英語|B組') {
+     throw new Error('不同課表備註未形成獨立分組範圍');
+   }
+   const noteRevisionA = context.scheduleRevision_([{ ...groupedRows[0], '備註': 'A組' }]);
+   const noteRevisionB = context.scheduleRevision_([{ ...groupedRows[0], '備註': 'B組' }]);
+   if (noteRevisionA === noteRevisionB) throw new Error('課表版本指紋未辨識備註變更');
+   const groupedResult = context.validateScheduleSnapshot_(groupedRows, {
+     classes: [{ '班級代碼': '701', '年級': '7', '是否虛擬班': 'FALSE' }],
+     subjects: [{ '科目代碼': '英語', '同時最多班數': '0' }],
+     assignments: groupedAssignments,
+     teacherBlocks: [], subjectRules: [], blockGroups: [], teacherExclusives: [], rooms: []
+   });
+   if (!groupedResult || !groupedResult.ok) throw new Error('不同備註的同班同科課表未通過快照稽核');
+   const sameClassSubjectDay = context.validateScheduleSnapshot_([
     { '課表ID': 'D1', '班級代碼': '701', '星期': '1', '節次': '1', '科目代碼': '英語', '教師姓名': 'T01', '課堂屬性': '一般' },
     { '課表ID': 'D2', '班級代碼': '701', '星期': '1', '節次': '2', '科目代碼': '英語', '教師姓名': 'T02', '課堂屬性': '一般' }
   ], {
@@ -2749,7 +2784,7 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
     const firstExportId = ctx.exportScheduleRowId_({ '課表ID': 'S1' }, '115-1', 0, 2, 0, usedExportIds);
     const secondExportId = ctx.exportScheduleRowId_({ '課表ID': 'S1' }, '115-1', 0, 2, 1, usedExportIds);
     if (firstExportId === secondExportId) throw new Error('多教師匯出課表ID仍重複');
-    if (!backend.includes("headers: ['課表ID', '班級代碼', '星期', '節次', '科目代碼', '教師姓名', '課堂屬性', '是否鎖定']")) throw new Error('schedule schema gained an unexpected column');
+     if (!backend.includes("headers: ['課表ID', '班級代碼', '星期', '節次', '科目代碼', '教師姓名', '課堂屬性', '是否鎖定', '備註']")) throw new Error('schedule schema is missing the persisted assignment note column');
    if (backend.includes('是否超鐘點')) throw new Error('backend still contains a separate overtime column');
    if (!backend.includes("patrol ? '' : String(s['班級代碼'] || '')")) throw new Error('巡堂匯出未清空班級欄');
     if (!backend.includes("function exportPatrolSchedule_(ss)")) throw new Error('巡堂專用匯出函式缺少');
@@ -3303,7 +3338,7 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
   });
   check('Preplanned course schema and display rules replace legacy preset fields', () => {
    if (!backend.includes("headers: ['配課ID', '班級代碼', '科目代碼', '教師姓名', '課程屬性', '每週節數', '備註']")) throw new Error('配課 schema 缺少課程屬性');
-   if (!backend.includes("headers: ['課表ID', '班級代碼', '星期', '節次', '科目代碼', '教師姓名', '課堂屬性', '是否鎖定']")) throw new Error('課表 schema 仍保留舊預排欄位');
+   if (!backend.includes("headers: ['課表ID', '班級代碼', '星期', '節次', '科目代碼', '教師姓名', '課堂屬性', '是否鎖定', '備註']")) throw new Error('課表 schema 缺少分組備註欄位');
    for (const legacy of ['預排星期', '預排節次', '是否預排']) {
      if (backend.includes(legacy) || app.includes(legacy) || runtime.includes(legacy) || html.includes(legacy)) throw new Error('生產程式仍引用舊欄位：' + legacy);
    }

@@ -460,6 +460,148 @@ async function main() {
     if (sourceRows.length !== 1 || sourceRows[0]['備註'] !== 'A組') throw new Error('移動其中一組時誤刪了來源格的另一個分組');
     console.log('PASS  同班同格不同教師分組可並存與移動');
   }
+  // 情境 12：跨班綁班的 A／B 備註分組必須各自成為獨立 cohort，移動 B 組不可帶走 A 組。
+  {
+    const data = baseData();
+    data.assignments.push(
+      { '配課ID': 'A_701_A', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T1', '每週節數': '1', '備註': 'A組' },
+      { '配課ID': 'A_702_A', '班級代碼': '702', '科目代碼': '英語', '教師姓名': 'T2', '每週節數': '1', '備註': 'A組' },
+      { '配課ID': 'A_701_B', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T3', '每週節數': '1', '備註': 'B組' },
+      { '配課ID': 'A_702_B', '班級代碼': '702', '科目代碼': '英語', '教師姓名': 'T4', '每週節數': '1', '備註': 'B組' }
+    );
+    data.blockGroups = [{
+      '群組ID': 'BG_NOTE_COHORT',
+      '群組名稱': '跨班英語分組',
+      '科目清單': '英語',
+      '班級清單': '701,702'
+    }];
+    data.schedule.push(
+      { '課表ID': 'S_701_A', '班級代碼': '701', '星期': '1', '節次': '1', '科目代碼': '英語', '教師姓名': 'T1', '課堂屬性': '一般', '備註': 'A組', '是否鎖定': 'FALSE' },
+      { '課表ID': 'S_702_A', '班級代碼': '702', '星期': '1', '節次': '1', '科目代碼': '英語', '教師姓名': 'T2', '課堂屬性': '一般', '備註': 'A組', '是否鎖定': 'FALSE' },
+      { '課表ID': 'S_701_B', '班級代碼': '701', '星期': '1', '節次': '2', '科目代碼': '英語', '教師姓名': 'T3', '課堂屬性': '一般', '備註': 'B組', '是否鎖定': 'FALSE' },
+      { '課表ID': 'S_702_B', '班級代碼': '702', '星期': '1', '節次': '2', '科目代碼': '英語', '教師姓名': 'T4', '課堂屬性': '一般', '備註': 'B組', '是否鎖定': 'FALSE' }
+    );
+    const context = buildContext(data);
+    const cohorts = vm.runInContext(`({
+      a: getBindGroupMembers('英語', '701', 'A組'),
+      b: getBindGroupMembers('英語', '701', 'B組')
+    })`, context);
+    if (cohorts.a.length !== 2 || cohorts.b.length !== 2 ||
+        cohorts.a.some(member => member.assignmentNote !== 'A組') ||
+        cohorts.b.some(member => member.assignmentNote !== 'B組')) {
+      throw new Error('跨班備註分組未被拆成獨立 cohort');
+    }
+
+    const plan = vm.runInContext(
+      `buildBindMovePlan({ subjectCode: '英語', srcCls: '701', srcDay: 1, srcPer: 2, dstCls: '701', dstDay: 1, dstPer: 1, assignmentNote: 'B組' })`,
+      context
+    );
+    if (!plan || !plan.ok || plan.sourceEntries.length !== 2 ||
+        plan.sourceEntries.some(entry => entry['備註'] !== 'B組')) {
+      throw new Error('B組移動計畫仍混入 A 組或未包含完整綁班成員');
+    }
+
+    vm.runInContext("optimisticMoveCell('701', 1, 2, '701', 1, 1, '', '', false, 'B組')", context);
+    const movedRows = vm.runInContext(
+      "state.schedule.filter(row => String(row['星期']) === '1' && String(row['節次']) === '1')",
+      context
+    );
+    const sourceRows = vm.runInContext(
+      "state.schedule.filter(row => String(row['星期']) === '1' && String(row['節次']) === '2')",
+      context
+    );
+    const aRows = vm.runInContext("state.schedule.filter(row => row['備註'] === 'A組')", context);
+    if (movedRows.length !== 4 || movedRows.filter(row => row['備註'] === 'B組').length !== 2 ||
+        movedRows.filter(row => row['備註'] === 'A組').length !== 2 ||
+        sourceRows.length !== 0 || aRows.length !== 2 ||
+        aRows.some(row => String(row['星期']) !== '1' || String(row['節次']) !== '1')) {
+      throw new Error('移動 B 組時誤帶走或誤刪除 A 組綁班課程');
+    }
+
+    const paletteContext = buildContext(data);
+    vm.runInContext(
+      "optimisticUpdateCell({ classCode: '701', day: 1, period: 1, subjectCode: '英語', teacherCode: 'T3', assignmentNote: 'B組' })",
+      paletteContext
+    );
+    const coLocatedRows = vm.runInContext(
+      "state.schedule.filter(row => String(row['星期']) === '1' && String(row['節次']) === '1')",
+      paletteContext
+    );
+    if (coLocatedRows.length !== 4 || coLocatedRows.filter(row => row['備註'] === 'A組').length !== 2 ||
+        coLocatedRows.filter(row => row['備註'] === 'B組').length !== 2) {
+      throw new Error('排入 B 組時誤覆寫同格的 A 組綁班課程');
+    }
+    console.log('PASS  跨班不同備註分組不可互帶');
+  }
+  // 情境 13：同一跨班 cohort 的成員備註可以不同，來源、教師與鎖定操作仍須逐成員辨識。
+  {
+    const data = baseData();
+    data.assignments.push(
+      { '配課ID': 'A_CROSS_701', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T1', '每週節數': '1', '備註': 'A組' },
+      { '配課ID': 'A_CROSS_702', '班級代碼': '702', '科目代碼': '英語', '教師姓名': 'T2', '每週節數': '1', '備註': 'B組' }
+    );
+    data.blockGroups = [{
+      '群組ID': 'BG_CROSS_MEMBER_NOTE',
+      '群組名稱': '跨班不同成員備註',
+      '科目清單': '英語',
+      '班級清單': '701,702'
+    }];
+    data.schedule.push(
+      { '課表ID': 'S_CROSS_701', '班級代碼': '701', '星期': '3', '節次': '1', '科目代碼': '英語', '教師姓名': 'T1', '課堂屬性': '一般', '備註': 'A組', '是否鎖定': 'FALSE' },
+      { '課表ID': 'S_CROSS_702', '班級代碼': '702', '星期': '3', '節次': '1', '科目代碼': '英語', '教師姓名': 'T2', '課堂屬性': '一般', '備註': 'B組', '是否鎖定': 'FALSE' }
+    );
+    const context = buildContext(data);
+    const members = vm.runInContext("getBindGroupMembers('英語', '701', 'A組')", context);
+    if (members.length !== 2 || members[0].assignmentNote !== 'A組' || members[1].assignmentNote !== 'B組') {
+      throw new Error('跨班 cohort 未保留各成員自己的備註');
+    }
+    const plan = vm.runInContext(
+      `buildBindMovePlan({ subjectCode: '英語', srcCls: '701', srcDay: 3, srcPer: 1, dstCls: '701', dstDay: 3, dstPer: 2, assignmentNote: 'A組' })`,
+      context
+    );
+    if (!plan || !plan.ok || plan.sourceEntries.length !== 2) throw new Error('跨班不同成員備註的移動計畫不完整');
+    vm.runInContext("optimisticLockCell('701', 3, 1, true, '', '英語', 'A組')", context);
+    const lockedRows = vm.runInContext("state.schedule.filter(row => String(row['星期']) === '3' && String(row['節次']) === '1')", context);
+    if (lockedRows.length !== 2 || lockedRows.some(row => row['是否鎖定'] !== 'TRUE')) {
+      throw new Error('跨班不同成員備註的鎖定未套用完整 cohort');
+    }
+    console.log('PASS  跨班 cohort 支援成員備註不同');
+  }
+  // 情境 14：自動排課也必須將同一綁班群組內的不同備註視為平行 cohort。
+  {
+    const data = baseData();
+    data.subjects[0]['同時最多班數'] = '4';
+    data.assignments.push(
+      { '配課ID': 'AUTO_701_A', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T1', '每週節數': '1', '備註': 'A組' },
+      { '配課ID': 'AUTO_702_A', '班級代碼': '702', '科目代碼': '英語', '教師姓名': 'T2', '每週節數': '1', '備註': 'A組' },
+      { '配課ID': 'AUTO_701_B', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T3', '每週節數': '1', '備註': 'B組' },
+      { '配課ID': 'AUTO_702_B', '班級代碼': '702', '科目代碼': '英語', '教師姓名': 'T4', '每週節數': '1', '備註': 'B組' }
+    );
+    data.blockGroups = [{
+      '群組ID': 'BG_AUTO_NOTE_COHORT',
+      '群組名稱': '自動排課備註分組',
+      '科目清單': '英語',
+      '班級清單': '701,702'
+    }];
+    const context = buildContext(data);
+    const schedule = await vm.runInContext(`(async () => {
+      await executeAutoSchedule();
+      return state.schedule;
+    })()`, context);
+    const rowsByNote = new Map(['A組', 'B組'].map(note => [note, schedule.filter(row => row['備註'] === note)]));
+    for (const note of ['A組', 'B組']) {
+      const rows = rowsByNote.get(note);
+      if (rows.length !== 2 || new Set(rows.map(row => row['班級代碼'])).size !== 2) {
+        throw new Error('自動排課未完整保留 ' + note + ' 綁班 cohort');
+      }
+      const slots = new Set(rows.map(row => String(row['星期']) + '-' + String(row['節次'])));
+      if (slots.size !== 1) throw new Error('自動排課未同步 ' + note + ' 綁班 cohort');
+    }
+    if (schedule.some(row => row['備註'] !== 'A組' && row['備註'] !== 'B組')) {
+      throw new Error('自動排課產生未標記備註的綁班課程');
+    }
+    console.log('PASS  自動排課隔離跨班不同備註分組');
+  }
 }
 
 function parseTeacherCodes(value) {

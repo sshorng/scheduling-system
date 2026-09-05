@@ -1476,32 +1476,36 @@
         (assignedSubjects.length?assignedSubjects:subjectCodes).forEach(subjectCode=>members.push({classCode,subjectCode}));
        });
        return members;
-      };
-      (state.blockGroups||[]).forEach(group=>{
-        const members=reportBindMembers(group);
-        const classCodes=[...new Set(members.map(member=>String(member.classCode||'').trim()).filter(Boolean))];
-        if(classCodes.length<2)return;
-        const membersByClass=new Map();
-        members.filter(member=>inScope(member.subjectCode)).forEach(member=>{
-          if(!membersByClass.has(member.classCode))membersByClass.set(member.classCode,new Set());
-          membersByClass.get(member.classCode).add(member.subjectCode);
-        });
-        const activeClassCodes=[...membersByClass.keys()];
-        if(activeClassCodes.length<2)return;
-        const signatures=activeClassCodes.map(classCode=>{
-          const subjects=membersByClass.get(classCode);
-           const slots=[...new Set(scopedSchedule.filter(item=>
-             String(item['班級代碼']||'')===classCode&&subjects.has(String(item['科目代碼']||''))
-           ).map(item=>parseInt(item['星期'],10)+'-'+parseInt(item['節次'],10)+'-'+reportWeekType(item)))].sort();
-          return {classCode,signature:slots.join(','),label:slots.length?slots.join('、'):'未排'};
-        });
-        const canonical=signatures[0]?.signature||'';
-        if(signatures.some(item=>item.signature!==canonical)){
-          const groupLabel=String(group['群組名稱']||group['群組ID']||classCodes.join('、'));
-          const details=signatures.map(item=>item.classCode+'：'+item.label).join('；');
-          violations.add('綁班不同步：'+groupLabel+'（'+details+'）');
-        }
-      });
+       };
+       const reportBindCohorts=group=>{
+        if(typeof getConfiguredBindCohorts==='function')return getConfiguredBindCohorts(group);
+        return [{cohortIndex:0,members:reportBindMembers(group)}];
+       };
+       (state.blockGroups||[]).forEach(group=>{
+         reportBindCohorts(group).forEach(cohort=>{
+           const members=(cohort.members||[]).filter(member=>inScope(member.subjectCode));
+           const classCodes=[...new Set(members.map(member=>String(member.classCode||'').trim()).filter(Boolean))];
+           if(classCodes.length<2)return;
+           const memberMatches=(item,member)=>
+             String(item['班級代碼']||'').trim()===String(member.classCode||'').trim()&&
+             String(item['科目代碼']||'').trim()===String(member.subjectCode||'').trim()&&
+             (!member.assignmentGroupKey||reportAssignmentGroupKeys(item).includes(member.assignmentGroupKey));
+           const signatures=classCodes.map(classCode=>{
+             const classMembers=members.filter(member=>String(member.classCode||'').trim()===classCode);
+             const slots=[...new Set(scopedSchedule.filter(item=>classMembers.some(member=>memberMatches(item,member)))
+               .map(item=>parseInt(item['星期'],10)+'-'+parseInt(item['節次'],10)+'-'+reportWeekType(item)))].sort();
+             return {classCode,signature:slots.join(','),label:slots.length?slots.join('、'):'未排'};
+           });
+           const canonical=signatures[0]?.signature||'';
+           if(signatures.some(item=>item.signature!==canonical)){
+             const notes=[...new Set(members.map(member=>String(member.assignmentNote||'').trim()).filter(Boolean))];
+             const baseLabel=String(group['群組名稱']||group['群組ID']||classCodes.join('、'));
+             const groupLabel=notes.length?baseLabel+'／'+notes.join('／'):baseLabel;
+             const details=signatures.map(item=>item.classCode+'：'+item.label).join('；');
+             violations.add('綁班不同步：'+groupLabel+'（'+details+'）');
+           }
+         });
+       });
     roomSlotItems.forEach((items,key)=>{const roomCode=key.split('|')[0],capacity=parseInt(idx.roomByCode?.[roomCode]?.['容量']||'1',10)||1;if(items.length>capacity)violations.add('教室衝突：'+roomCode+' '+key.split('|')[1]+'-'+key.split('|')[2]+'（'+items.length+'/'+capacity+'）');});
     concurrent.forEach((count,key)=>{const subjectCode=key.split('|')[0],max=parseInt(idx.subjectByCode[subjectCode]?.['同時最多班數']||'0',10)||0;if(max>0&&count>max)violations.add('科目同時班數超限：'+key+'（'+count+'/'+max+'）');});
       classSubjectDayCounts.forEach((count,key)=>{if(count<2)return;const parts=key.split(auditGroupSeparator),spreadKey=parts[0],day=parts[1],weekType=parts[2],meta=classSubjectGroupMeta.get(spreadKey)||{},classCode=meta.classCode||spreadKey.split('|')[0],subjectCode=meta.subjectCode||spreadKey.split('|')[1],groupLabel=meta.assignmentGroupKey?String(state.assignments.find(assignment=>runtimeAssignmentGroupKey(assignment)===meta.assignmentGroupKey)?.['備註']||'').trim():'',mandatorySlots=typeof getMandatoryRuleDaySlots==='function'?getMandatoryRuleDaySlots(subjectCode,classCode,Number(day)):[],allowedPeriods=new Set(mandatorySlots.map(slot=>Number(slot.period))),actualPeriods=classSubjectDayPeriods.get(key)||new Set(),entries=classSubjectDayEntries.get(key)||[],lockedBlockOnly=entries.length>0&&entries.every(entry=>isLockedConsecutiveEntry(entry,auditSchedule)),isAllowed=lockedBlockOnly||(mandatorySlots.length>1&&count===mandatorySlots.length&&actualPeriods.size===count&&[...actualPeriods].every(period=>allowedPeriods.has(period)));if(!isAllowed)violations.add('同班同科同日重複：'+classCode+' '+subjectCode+(groupLabel?'（'+groupLabel+'）':'')+' 星期'+day+(weekType!=='全週'?'（'+weekType+'）':'')+'（'+count+'節）');});

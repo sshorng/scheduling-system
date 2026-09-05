@@ -11,7 +11,7 @@
 
 // ===================== 工作表定義 =====================
 
-const GAS_VERSION = '20260905_v1214_group_slot';
+const GAS_VERSION = '20260905_v1215_bind_cohort';
 const SCHEMA_VERSION = '20260905_schedule_note_v1';
 
 // 所有會改動試算表的動作共用同一把 ScriptLock，避免多視窗或快速連點互相覆寫。
@@ -1181,21 +1181,18 @@ function clearCell_(ss, p) {
   }
   if (matchingIndices.length === 0) return { ok: true, scheduleRevision: scheduleRevision_(rows) };
 
-  const bindEntry = matchingIndices.map(index => rows[index]).find(row => getBindGroupForEntry_(row, blockGroups));
-  const bindGroup = bindEntry ? getBindGroupForEntry_(bindEntry, blockGroups) : null;
-  const bindGroupKey = bindGroup ? String(bindGroup['群組ID'] || bindGroup['群組名稱'] || '') : '';
-  const bindCohortMembers = bindEntry && bindGroup
-    ? getConfiguredBindCohortMembers_(bindGroup, p.subjectCode || bindEntry['科目代碼'], p.classCode, assignments)
-    : [];
+  const bindEntry = matchingIndices.map(index => rows[index]).find(row => getBindGroupCohortForEntry_(row, blockGroups, assignments));
+  const bindCohort = bindEntry ? getBindGroupCohortForEntry_(bindEntry, blockGroups, assignments) : null;
+  const bindGroupKey = bindCohort ? bindCohortKey_(bindCohort) : '';
+  const bindCohortMembers = bindCohort ? bindCohort.members : [];
   const deleteIndices = bindEntry
     ? rows.map((row, index) => {
-        const rowGroup = getBindGroupForEntry_(row, blockGroups);
+        const rowCohort = getBindGroupCohortForEntry_(row, blockGroups, assignments);
         const sameSlot = parseInt(row['星期'], 10) === dayN && parseInt(row['節次'], 10) === periodN &&
           (!String(p.weekType || p.week || '').trim() || String(row['課堂屬性'] || '').trim() === String(p.weekType || p.week).trim()) &&
-          rowGroup && String(rowGroup['群組ID'] || rowGroup['群組名稱'] || '') === bindGroupKey &&
+          rowCohort && bindCohortKey_(rowCohort) === bindGroupKey &&
           (bindCohortMembers.length === 0 || bindCohortMembers.some(member =>
-            member.classCode === String(row['班級代碼'] || '').trim() &&
-            member.subjectCode === String(row['科目代碼'] || '').trim()
+            bindMemberKey_(member) === bindRowMemberKey_(row, assignments)
           ));
         return sameSlot ? index : -1;
       }).filter(index => index >= 0)
@@ -1306,16 +1303,10 @@ function lockCell_(ss, p) {
   if (idx < 0) return { ok: false, error: '此格沒有課程' };
   const targetRow = rows[idx];
   const blockGroups = sheetToObjects_(ss.getSheetByName('綁班'));
-  const bindGroup = getBindGroupForEntry_(targetRow, blockGroups);
+  const bindCohort = getBindGroupCohortForEntry_(targetRow, blockGroups, assignments);
   let targetIndices = [idx];
-  if (bindGroup) {
-    const members = getConfiguredBindCohortMembers_(
-      bindGroup,
-      String(targetRow['科目代碼'] || '').trim(),
-      String(targetRow['班級代碼'] || '').trim(),
-      assignments
-    );
-    const expectedKeys = members.map(member => member.classCode + '|' + member.subjectCode);
+  if (bindCohort) {
+    const expectedKeys = bindCohort.members.map(bindMemberKey_);
     const expectedKeySet = new Set(expectedKeys);
     const indexByKey = new Map();
     let duplicate = false;
@@ -1323,7 +1314,7 @@ function lockCell_(ss, p) {
       if (String(row['星期'] || '') !== String(targetRow['星期'] || '') ||
           parseInt(row['節次'], 10) !== periodN ||
           (periodN === 8 && String(row['課堂屬性'] || '').trim() !== String(targetRow['課堂屬性'] || '').trim())) return;
-      const key = String(row['班級代碼'] || '').trim() + '|' + String(row['科目代碼'] || '').trim();
+       const key = bindRowMemberKey_(row, assignments);
       if (!expectedKeySet.has(key)) return;
       if (indexByKey.has(key)) duplicate = true;
       indexByKey.set(key, rowIndex);
@@ -2483,15 +2474,79 @@ function getConfiguredBindMembers_(group, assignments) {
   return members;
 }
 
-function getConfiguredBindCohortMembers_(group, subjectCode, classCode, assignments) {
+function getBindAssignmentVariants_(classCode, subjectCode, assignments) {
+  const seenNotes = {};
+  const variants = [];
+  (Array.isArray(assignments) ? assignments : [])
+    .filter(assignment =>
+      String(assignment['班級代碼'] || '').trim() === String(classCode || '').trim() &&
+      String(assignment['科目代碼'] || '').trim() === String(subjectCode || '').trim()
+    )
+    .forEach(assignment => {
+      const assignmentNote = String(assignment['備註'] || '').trim();
+      if (seenNotes[assignmentNote]) return;
+      seenNotes[assignmentNote] = true;
+      variants.push({
+        assignmentNote,
+        assignmentGroupKey: String(classCode || '').trim() + '|' +
+          String(subjectCode || '').trim() + '|' + assignmentNote
+      });
+    });
+  return variants.length > 0 ? variants : [{ assignmentNote: '', assignmentGroupKey: '' }];
+}
+
+function getConfiguredBindCohorts_(group, assignments) {
+  const baseMembers = getConfiguredBindMembers_(group, assignments);
+  const byClass = {};
+  baseMembers.forEach(member => {
+    if (!byClass[member.classCode]) byClass[member.classCode] = [];
+    byClass[member.classCode].push(member);
+  });
+  const classCohorts = {};
+  const classCodes = Object.keys(byClass);
+  let maxCohorts = 0;
+  classCodes.forEach(classCode => {
+    const members = byClass[classCode];
+    const variantLists = members.map(member =>
+      getBindAssignmentVariants_(member.classCode, member.subjectCode, assignments)
+    );
+    const cohortCount = Math.max(1, ...variantLists.map(variants => variants.length));
+    maxCohorts = Math.max(maxCohorts, cohortCount);
+    classCohorts[classCode] = Array.from({ length: cohortCount }, (_, cohortIndex) =>
+      members.map((member, memberIndex) => {
+        const variant = variantLists[memberIndex][cohortIndex];
+        return variant ? Object.assign({}, member, variant) : null;
+      }).filter(Boolean)
+    );
+  });
+  return Array.from({ length: maxCohorts }, (_, cohortIndex) => ({
+    cohortIndex,
+    members: classCodes.reduce((result, classCode) =>
+      result.concat(classCohorts[classCode]?.[cohortIndex] || []), [])
+  })).filter(cohort => [...new Set(cohort.members.map(member => member.classCode))].length >= 2);
+}
+
+function getConfiguredBindCohortMembers_(group, subjectCode, classCode, assignments, assignmentNote) {
+  const targetSubject = String(subjectCode || '').trim();
+  const targetClass = String(classCode || '').trim();
+  const requestedNote = String(assignmentNote || '').trim();
+  const cohorts = getConfiguredBindCohorts_(group, assignments);
+  const cohort = cohorts.find(candidate => candidate.members.some(member =>
+    member.classCode === targetClass &&
+    member.subjectCode === targetSubject &&
+    (!requestedNote || member.assignmentNote === requestedNote)
+  ));
+  if (cohort) return cohort.members;
+  if (requestedNote) return [];
+
   const members = getConfiguredBindMembers_(group, assignments);
   const byClass = {};
   members.forEach(member => {
     if (!byClass[member.classCode]) byClass[member.classCode] = [];
     byClass[member.classCode].push(member);
   });
-  const targetMembers = byClass[String(classCode || '').trim()] || [];
-  const targetIndex = targetMembers.findIndex(member => member.subjectCode === String(subjectCode || '').trim());
+  const targetMembers = byClass[targetClass] || [];
+  const targetIndex = targetMembers.findIndex(member => member.subjectCode === targetSubject);
   if (targetIndex < 0) return [];
   return Object.keys(byClass).map(key => byClass[key][targetIndex]).filter(Boolean);
 }
@@ -2509,6 +2564,48 @@ function getBindGroupForEntry_(entry, blockGroups) {
   }) || null;
 }
 
+function getBindGroupCohortForEntry_(entry, blockGroups, assignments) {
+  const group = getBindGroupForEntry_(entry, blockGroups);
+  if (!group) return null;
+  const subjectCode = String(entry['科目代碼'] || '').trim();
+  const classCode = String(entry['班級代碼'] || '').trim();
+  const assignmentNote = scheduleAssignmentNoteForRow_(entry, assignments || []);
+  const cohorts = getConfiguredBindCohorts_(group, assignments || []);
+  const cohort = cohorts.find(candidate => candidate.members.some(member =>
+    member.classCode === classCode &&
+    member.subjectCode === subjectCode &&
+    (!assignmentNote || member.assignmentNote === assignmentNote)
+  ));
+  if (cohort) return { group, members: cohort.members, cohortIndex: cohort.cohortIndex };
+  const fallbackMembers = getConfiguredBindCohortMembers_(group, subjectCode, classCode, assignments || [], assignmentNote);
+  if (fallbackMembers.length < 2) return null;
+  return {
+    group,
+    members: fallbackMembers,
+    cohortIndex: 0
+  };
+}
+
+function bindGroupKey_(group) {
+  return String(group && (group['群組ID'] || group['群組名稱']) || '');
+}
+
+function bindCohortKey_(cohort) {
+  return cohort ? bindGroupKey_(cohort.group) + '|C' + String(cohort.cohortIndex || 0) : '';
+}
+
+function bindMemberKey_(member) {
+  return String(member && member.classCode || '').trim() + '|' +
+    String(member && member.subjectCode || '').trim() + '|' +
+    String(member && member.assignmentNote || '').trim();
+}
+
+function bindRowMemberKey_(row, assignments) {
+  return String(row && row['班級代碼'] || '').trim() + '|' +
+    String(row && row['科目代碼'] || '').trim() + '|' +
+    scheduleAssignmentNoteForRow_(row, assignments || []);
+}
+
 function bindScheduleSlotKey_(row) {
   const period = parseInt(row['節次'], 10);
   const attr = period === 8 ? String(row['課堂屬性'] || '一般') : '一般';
@@ -2523,36 +2620,41 @@ function boundScheduleChangeCheck_(currentRows, incomingRows, blockGroups, assig
   });
   const instances = new Map();
   (currentRows || []).forEach(row => {
-    const group = getBindGroupForEntry_(row, blockGroups);
+    const cohort = getBindGroupCohortForEntry_(row, blockGroups, assignments || []);
     const id = String(row['課表ID'] || '').trim();
-    if (!group || !id) return;
-    const key = String(group['群組ID'] || group['群組名稱'] || '');
-    if (!instances.has(key)) instances.set(key, { group, rows: [] });
+    if (!cohort || !id) return;
+    const key = bindCohortKey_(cohort);
+    if (!instances.has(key)) instances.set(key, {
+      group: cohort.group,
+      cohortIndex: cohort.cohortIndex,
+      members: cohort.members,
+      rows: []
+    });
     instances.get(key).rows.push(row);
   });
 
   for (const instance of instances.values()) {
-    const groupKey = String(instance.group['群組ID'] || instance.group['群組名稱'] || '');
+    const groupKey = bindGroupKey_(instance.group);
+    const expectedCohortKey = bindCohortKey_(instance);
     const incomingGroupRows = (incomingRows || []).filter(row => {
-      const group = getBindGroupForEntry_(row, blockGroups);
-      return group && String(group['群組ID'] || group['群組名稱'] || '') === groupKey;
+      const cohort = getBindGroupCohortForEntry_(row, blockGroups, assignments || []);
+      return cohort && bindGroupKey_(cohort.group) === groupKey && bindCohortKey_(cohort) === expectedCohortKey;
     });
     // 整組刪除是允許的；只刪掉其中一班則拒絕。
     if (incomingGroupRows.length === 0) continue;
     for (const before of instance.rows) {
       const after = incomingById.get(String(before['課表ID'] || '').trim());
-      const afterGroup = after ? getBindGroupForEntry_(after, blockGroups) : null;
-      const afterGroupKey = afterGroup ? String(afterGroup['群組ID'] || afterGroup['群組名稱'] || '') : '';
+      const afterCohort = after ? getBindGroupCohortForEntry_(after, blockGroups, assignments || []) : null;
       if (!after) {
         return { ok: false, blocked: true, error: '綁班課程不可只移動或刪除其中一班，請整組處理' };
       }
       if (String(before['班級代碼'] || '') !== String(after['班級代碼'] || '') ||
-          !afterGroup || afterGroupKey !== groupKey) {
+          !afterCohort || bindCohortKey_(afterCohort) !== expectedCohortKey) {
         return { ok: false, blocked: true, error: '綁班課程的班級或綁班群組不可被單獨改動' };
       }
     }
 
-    const members = getConfiguredBindMembers_(instance.group, assignments);
+    const members = instance.members || [];
     const expectedClasses = [...new Set(members.map(member => member.classCode))];
     const incomingByClass = new Map(expectedClasses.map(classCode => [classCode, []]));
     incomingGroupRows.forEach(row => {
@@ -2607,35 +2709,37 @@ function scheduleRowSlotKey_(row) {
 function validateBindSnapshot_(schedule, blockGroups, assignments) {
   const errors = [];
   const groupRows = new Map();
-  const groupKey = group => String(group['群組ID'] || group['群組名稱'] || '');
   (schedule || []).forEach(row => {
-    const group = getBindGroupForEntry_(row, blockGroups);
-    if (!group) return;
-    const key = groupKey(group);
-    if (!groupRows.has(key)) groupRows.set(key, { group, rows: [] });
+    const cohort = getBindGroupCohortForEntry_(row, blockGroups, assignments || []);
+    if (!cohort) return;
+    const key = bindCohortKey_(cohort);
+    if (!groupRows.has(key)) groupRows.set(key, {
+      group: cohort.group,
+      cohortIndex: cohort.cohortIndex,
+      members: cohort.members,
+      rows: []
+    });
     groupRows.get(key).rows.push(row);
   });
 
   groupRows.forEach(instance => {
-    const members = getConfiguredBindMembers_(instance.group, assignments);
+    const members = instance.members || [];
     const expectedClasses = [...new Set(members.map(member => member.classCode))];
     const byClass = new Map(expectedClasses.map(classCode => [classCode, new Set()]));
     const memberByClass = new Map();
     members.forEach(member => {
       if (!memberByClass.has(member.classCode)) memberByClass.set(member.classCode, new Set());
-      memberByClass.get(member.classCode).add(member.subjectCode);
+      memberByClass.get(member.classCode).add(bindMemberKey_(member));
     });
     instance.rows.forEach(row => {
       const classCode = String(row['班級代碼'] || '').trim();
-      const subjectCode = String(row['科目代碼'] || '').trim();
-      if (!byClass.has(classCode) || !memberByClass.get(classCode)?.has(subjectCode)) return;
+      if (!byClass.has(classCode) || !memberByClass.get(classCode)?.has(bindRowMemberKey_(row, assignments))) return;
       byClass.get(classCode).add(bindScheduleSlotKey_(row));
     });
     const lockStates = new Map();
     instance.rows.forEach(row => {
       const classCode = String(row['班級代碼'] || '').trim();
-      const subjectCode = String(row['科目代碼'] || '').trim();
-      if (!byClass.has(classCode) || !memberByClass.get(classCode)?.has(subjectCode)) return;
+      if (!byClass.has(classCode) || !memberByClass.get(classCode)?.has(bindRowMemberKey_(row, assignments))) return;
       const slot = bindScheduleSlotKey_(row);
       if (!lockStates.has(slot)) lockStates.set(slot, new Set());
       lockStates.get(slot).add(String(row['是否鎖定'] || '').toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE');

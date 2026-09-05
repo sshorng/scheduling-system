@@ -640,13 +640,13 @@ check('Bind locking is atomic across every member', () => {
   const lockStart = app.indexOf('function optimisticLockCell');
   const lockEnd = app.indexOf('function bindClassTTEvents', lockStart);
   const lockBlock = app.slice(lockStart, lockEnd);
-  if (!lockBlock.includes('getBindGroupMembers(subjectCode, classCode)')) throw new Error('frontend bind lock does not load every member');
+  if (!lockBlock.includes('getBindGroupMembers(subjectCode, classCode, assignmentNote)')) throw new Error('frontend bind lock does not load every member');
   if (!lockBlock.includes('targetEntries.some(entry => !entry)')) throw new Error('frontend bind lock does not reject incomplete groups');
   if (!lockBlock.includes("subjectCode, weekType: targetWeek")) throw new Error('frontend bind lock payload does not identify the subject and week');
   const backendLockStart = backend.indexOf('function lockCell_');
   const backendLockEnd = backend.indexOf('function setOvertime_', backendLockStart);
   const backendLockBlock = backend.slice(backendLockStart, backendLockEnd);
-  if (!backendLockBlock.includes('getConfiguredBindCohortMembers_')) throw new Error('GAS bind lock does not load every member');
+  if (!backendLockBlock.includes('getBindGroupCohortForEntry_')) throw new Error('GAS bind lock does not load every member');
   if (!backendLockBlock.includes('targetIndices')) throw new Error('GAS bind lock does not update all member rows');
   if (!backend.includes('綁班鎖定狀態不一致')) throw new Error('GAS snapshot audit does not reject mixed bind lock states');
 });
@@ -662,7 +662,7 @@ check('Locked extraction lessons show lock icons in teacher timetable', () => {
   if (!teacherBlock.includes("(ATTR_LABELS[attr]||'')")) throw new Error('teacher timetable lost extraction attribute flag');
 });
 check('Backend batch writes reject partial bind moves', () => {
-  const start = backend.indexOf('function splitBindList_');
+  const start = 0;
   const end = backend.indexOf('function isAllowedCombinedClassCohort_', start);
   const context = {};
   vm.createContext(context);
@@ -696,8 +696,35 @@ check('Backend batch writes reject partial bind moves', () => {
   const scopedMixedAttrs = scopedCurrent.map(row => String(row['科目代碼']) === '資優英語' ? { ...row, '課堂屬性': '抽離' } : row);
   if (context.validateBindSnapshot_(scopedMixedAttrs, scopedGroups, scopedAssignments).length !== 0) throw new Error('virtual bind class attr was treated as a different slot');
   if (context.validateBindSnapshot_([scopedCurrent[0]], scopedGroups, scopedAssignments).length === 0) throw new Error('partial subject-scoped bind snapshot was accepted');
+  const noteGroups = [{ '群組ID': 'BG_NOTE_COHORT', '科目清單': '英語', '班級清單': '701,702' }];
+  const noteAssignments = [
+    { '班級代碼': '701', '科目代碼': '英語', '備註': 'A組' },
+    { '班級代碼': '702', '科目代碼': '英語', '備註': 'A組' },
+    { '班級代碼': '701', '科目代碼': '英語', '備註': 'B組' },
+    { '班級代碼': '702', '科目代碼': '英語', '備註': 'B組' }
+  ];
+  const noteCurrent = [
+    { '課表ID': 'NA1', '班級代碼': '701', '星期': 1, '節次': 1, '科目代碼': '英語', '備註': 'A組', '是否鎖定': 'FALSE' },
+    { '課表ID': 'NA2', '班級代碼': '702', '星期': 1, '節次': 1, '科目代碼': '英語', '備註': 'A組', '是否鎖定': 'FALSE' },
+    { '課表ID': 'NB1', '班級代碼': '701', '星期': 1, '節次': 2, '科目代碼': '英語', '備註': 'B組', '是否鎖定': 'FALSE' },
+    { '課表ID': 'NB2', '班級代碼': '702', '星期': 1, '節次': 2, '科目代碼': '英語', '備註': 'B組', '是否鎖定': 'FALSE' }
+  ];
+  const noteMoved = noteCurrent.map(row => String(row['備註']) === 'A組'
+    ? { ...row, '星期': 2, '節次': 2 }
+    : row);
+  if (!context.boundScheduleChangeCheck_(noteCurrent, noteMoved, noteGroups, noteAssignments).ok) {
+    throw new Error('A／B 備註分組的獨立移動被錯誤拒絕');
+  }
+  const notePartial = noteMoved.filter(row => row['課表ID'] !== 'NA2');
+  const notePartialResult = context.boundScheduleChangeCheck_(noteCurrent, notePartial, noteGroups, noteAssignments);
+  if (notePartialResult.ok || !String(notePartialResult.error).includes('不可只移動')) {
+    throw new Error('A 組部分移動未被阻擋，或錯誤訊息不正確');
+  }
+  if (context.validateBindSnapshot_(noteCurrent, noteGroups, noteAssignments).length !== 0) {
+    throw new Error('A／B 備註分組的完整課表被誤判為不同步');
+  }
   if (!backend.includes('const bindCheck = boundScheduleChangeCheck_(currentRows, schedule, blockGroups, assignments)')) throw new Error('batch write does not run bind integrity check');
-  if (!backend.includes('getConfiguredBindMembers_(instance.group, assignments)')) throw new Error('backend bind check does not use configured bind members');
+  if (!backend.includes('instance.members || []')) throw new Error('backend bind check does not use scoped bind members');
   if (!backend.includes('function bindScheduleSlotKey_')) throw new Error('bind slot normalization helper missing');
 });
 check('Manual exclusive conflict can be force-placed', () => {
@@ -805,7 +832,7 @@ check('Subject relation soft rule is wired end to end', () => {
   if (!backend.includes("'科目關係':")) throw new Error('subject relation sheet definition missing');
   if (!backend.includes("headers: ['規則ID', '科目A', '科目B', '適用年級', '適用班級', '備註']")) throw new Error('subject relation schema missing');
   if (!backend.includes("subjectRelations:   sheetToObjects_(ss.getSheetByName('科目關係'))")) throw new Error('getAll does not return subject relations');
-   if (!backend.includes("const GAS_VERSION = '20260905_v1214_group_slot';")) throw new Error('GAS version marker missing');
+  if (!backend.includes("const GAS_VERSION = '20260905_v1215_bind_cohort';")) throw new Error('GAS version marker missing');
   if (!backend.includes('function saveSubjectRelation_(ss, p)')) throw new Error('atomic subject relation save missing');
   if (!backend.includes("case 'saveSubjectRelation': result = saveSubjectRelation_(ss, payload); break;")) throw new Error('subject relation save route missing');
   for (const marker of [
@@ -863,7 +890,7 @@ check('Subject relation warning respects class scope', () => {
   if (context.getSubjectRelationWarnings(2, '國文', '701', schedule).length !== 1) throw new Error('綁班不應停用同班科目關係');
 });
 check('Frontend and backend versions use a handshake', () => {
-  if (!app.includes("const FRONTEND_VERSION = '20260905_v1214_group_slot';")) throw new Error('frontend version marker missing');
+  if (!app.includes("const FRONTEND_VERSION = '20260905_v1215_bind_cohort';")) throw new Error('frontend version marker missing');
   if (!app.includes('res.data.gasVersion')) throw new Error('frontend does not read GAS version');
   if (!app.includes('前後端版本不同')) throw new Error('version mismatch warning missing');
   if (!backend.includes('gasVersion:          GAS_VERSION')) throw new Error('GAS getAll version missing');
@@ -1503,7 +1530,7 @@ check('Bind-group pass yields and has finite retry rounds', () => {
    if (!autoBlock.includes('const bindFailureLessons = []')) throw new Error('bind failures are not kept separate from general retry queue');
    if (!autoBlock.includes('const bindFailureDiagnostics = new Map()')) throw new Error('bind failure diagnostics are missing');
    if (!autoBlock.includes('directCommonSlots')) throw new Error('bind common-slot diagnostics are missing');
-  if (!autoBlock.includes('!getBindGroupClasses(pendingLessons[index].subjectCode, pendingLessons[index].classCode)')) throw new Error('general queue can still consume bind lessons');
+  if (!autoBlock.includes('pendingLessons[index].assignmentGroupKey')) throw new Error('general queue can still consume bind lessons');
 });
 check('Teacher block save updates rows in place instead of appending', () => {
   const fnStart = backend.indexOf('function saveTeacherBlock_');

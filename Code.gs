@@ -11,8 +11,8 @@
 
 // ===================== 工作表定義 =====================
 
-const GAS_VERSION = '20260905_v1215_bind_cohort';
-const SCHEMA_VERSION = '20260905_schedule_note_v1';
+const GAS_VERSION = '20260826_v1212_export_excludes_preplanned';
+const SCHEMA_VERSION = '20260826_bilingual_course_v5';
 
 // 所有會改動試算表的動作共用同一把 ScriptLock，避免多視窗或快速連點互相覆寫。
 const LOCKED_WRITE_ACTIONS = new Set([
@@ -40,7 +40,7 @@ const SHEET_DEFS = {
     key: '配課ID'
   },
   '課表': {
-    headers: ['課表ID', '班級代碼', '星期', '節次', '科目代碼', '教師姓名', '課堂屬性', '是否鎖定', '備註'],
+    headers: ['課表ID', '班級代碼', '星期', '節次', '科目代碼', '教師姓名', '課堂屬性', '是否鎖定'],
     key: '課表ID'
   },
   '不排課': {
@@ -561,7 +561,7 @@ function scheduleRevision_(rows) {
   const normalized = (rows || []).map(row => JSON.stringify([
     String(row['課表ID'] || ''), String(row['班級代碼'] || ''), String(row['星期'] || ''),
     String(row['節次'] || ''), String(row['科目代碼'] || ''), String(row['教師姓名'] || ''),
-    String(row['課堂屬性'] || ''), String(row['是否鎖定'] || ''), String(row['備註'] || '')
+    String(row['課堂屬性'] || ''), String(row['是否鎖定'] || '')
   ])).sort();
   const text = normalized.join('');
   let hash = 2166136261;
@@ -702,8 +702,6 @@ function scheduleMatchesAssignment_(row, assignment) {
   if (!row || !assignment ||
       String(row['班級代碼'] || '').trim() !== String(assignment['班級代碼'] || '').trim() ||
       String(row['科目代碼'] || '').trim() !== String(assignment['科目代碼'] || '').trim()) return false;
-  const rowNote = String(row['備註'] || '').trim();
-  if (rowNote && rowNote !== String(assignment['備註'] || '').trim()) return false;
   const rowTeachers = teacherCodesFromValue_(row['教師姓名']);
   const assignmentTeachers = teacherCodesFromValue_(assignment['教師姓名']);
   return assignmentTeachers.length === 0 || assignmentTeachers.some(code => rowTeachers.indexOf(code) >= 0);
@@ -769,8 +767,7 @@ function checkConflicts_(ss, p, excludeId, preloaded) {
     scheduleMatchesAssignment_({
       '班級代碼': p.classCode,
       '科目代碼': subjectCode,
-      '教師姓名': p.teacherCode,
-      '備註': p.assignmentNote
+      '教師姓名': p.teacherCode
     }, assignment) && assignmentIsAlternateWeek_(assignment, subjectByCode)
   );
   const requestedWeekType = periodN === 8
@@ -797,14 +794,7 @@ function checkConflicts_(ss, p, excludeId, preloaded) {
   // 第八節一般課程會佔用單週與雙週，不能和任一週次課程重疊；單週與雙週可各排一門。
   if (periodN === 8 && p.classCode) {
     const sameClassSlot = slotCells.filter(row => String(row['班級代碼'] || '').trim() === String(p.classCode || '').trim());
-    const hasAssignmentNote = Object.prototype.hasOwnProperty.call(p || {}, 'assignmentNote');
-    const requestedNote = String(p.assignmentNote || '').trim();
-    const overlap = sameClassSlot.find(row => {
-      if (isAlternateWeekPair_(p, row)) return false;
-      if (String(row['科目代碼'] || '').trim() !== subjectCode) return true;
-      if (!hasAssignmentNote) return true;
-      return scheduleAssignmentNoteForRow_(row, assignments) === requestedNote;
-    });
+    const overlap = sameClassSlot.find(row => !isAlternateWeekPair_(p, row));
     if (overlap) {
       conflicts.push({
         hard: true,
@@ -891,12 +881,10 @@ function checkConflicts_(ss, p, excludeId, preloaded) {
 
     const sameClassSubjectDayPeriods = schedule
       .filter(row => String(row['課表ID']) !== exclude &&
-         String(row['班級代碼']) === String(p.classCode) &&
-         String(row['科目代碼']) === subjectCode &&
-         parseInt(row['星期'], 10) === dayN &&
-         (p.assignmentNote === undefined ||
-           scheduleAssignmentNoteForRow_(row, assignments) === String(p.assignmentNote || '').trim()) &&
-         !isAlternateWeekPair_(p, row))
+        String(row['班級代碼']) === String(p.classCode) &&
+        String(row['科目代碼']) === subjectCode &&
+        parseInt(row['星期'], 10) === dayN &&
+        !isAlternateWeekPair_(p, row))
       .map(row => parseInt(row['節次'], 10));
     if (sameClassSubjectDayPeriods.length > 0 && !isValidMandatorySameDayProgress_(
       subjectCode,
@@ -1041,33 +1029,7 @@ function teacherCodesFromValue_(value) {
   return result;
 }
 
-function scheduleAssignmentNoteForRow_(row, assignments) {
-  const classCode = String(row && row['班級代碼'] || '').trim();
-  const subjectCode = String(row && row['科目代碼'] || '').trim();
-  if (!classCode || !subjectCode) return '';
-  const storedNote = String(row && row['備註'] || '').trim();
-  if (storedNote) return storedNote;
-  const notes = (assignments || [])
-    .filter(assignment =>
-      String(assignment['班級代碼'] || '').trim() === classCode &&
-      String(assignment['科目代碼'] || '').trim() === subjectCode &&
-      scheduleMatchesAssignment_(row, assignment)
-    )
-    .map(assignment => String(assignment['備註'] || '').trim())
-    .filter(Boolean);
-  return [...new Set(notes)].length === 1 ? [...new Set(notes)][0] : '';
-}
-
-function scheduleAssignmentScopeKey_(row, assignments) {
-  const classCode = String(row && row['班級代碼'] || '').trim();
-  const subjectCode = String(row && row['科目代碼'] || '').trim();
-  const note = scheduleAssignmentNoteForRow_(row, assignments);
-  return note
-    ? 'assignment:' + classCode + '|' + subjectCode + '|' + note
-    : 'class-subject';
-}
-
-function findScheduleSlotIndices_(rows, classCode, dayN, periodN, weekType, subjectCode, assignmentNote, assignments) {
+function findScheduleSlotIndices_(rows, classCode, dayN, periodN, weekType) {
   const targetCls = String(classCode || '').trim();
   const targetWeek = parseInt(periodN, 10) === 8 ? String(weekType || '').trim() : '';
   const matching = [];
@@ -1076,17 +1038,11 @@ function findScheduleSlotIndices_(rows, classCode, dayN, periodN, weekType, subj
     if (String(r['班級代碼'] || '').trim() === targetCls &&
         parseInt(r['星期'], 10) === dayN &&
         parseInt(r['節次'], 10) === periodN &&
-         (!targetWeek || String(r['課堂屬性'] || '').trim() === targetWeek)) {
+        (!targetWeek || String(r['課堂屬性'] || '').trim() === targetWeek)) {
       matching.push(i);
     }
   }
-  const wantedSubject = String(subjectCode || '').trim();
-  const bySubject = wantedSubject
-    ? matching.filter(index => String(rows[index]['科目代碼'] || '').trim() === wantedSubject)
-    : matching;
-  if (assignmentNote === undefined || assignmentNote === null) return bySubject;
-  const wantedNote = String(assignmentNote || '').trim();
-  return bySubject.filter(index => scheduleAssignmentNoteForRow_(rows[index], assignments) === wantedNote);
+  return matching;
 }
 
 function updateCell_(ss, p) {
@@ -1111,7 +1067,7 @@ function updateCell_(ss, p) {
   const targetWeek = periodN === 8
     ? String(p.weekType || p.week || p.attr || '').trim()
     : '';
-  const matchingIndices = findScheduleSlotIndices_(rows, targetCls, dayN, periodN, targetWeek, p.subjectCode, p.assignmentNote, preloaded.assignments);
+  const matchingIndices = findScheduleSlotIndices_(rows, targetCls, dayN, periodN, targetWeek);
   const existingId = String(p.existingId || '').trim() ||
     (matchingIndices.length === 1 ? String(rows[matchingIndices[0]]['課表ID'] || '').trim() : '');
   const conflictPayload = {
@@ -1149,8 +1105,7 @@ function updateCell_(ss, p) {
     '星期': dayN, '節次': periodN,
     '科目代碼': String(p.subjectCode || ''), '教師姓名': teacherTc,
     '課堂屬性': attr,
-    '是否鎖定': p.isLocked ? 'TRUE' : 'FALSE',
-    '備註': String(p.assignmentNote || '').trim()
+    '是否鎖定': p.isLocked ? 'TRUE' : 'FALSE'
   };
 
   const values = headers.map(h => newRow[h] !== undefined ? newRow[h] : '');
@@ -1171,28 +1126,31 @@ function clearCell_(ss, p) {
   const rows = sheetToObjects_(sheet);
   const dayN = parseInt(p.day, 10);
   const periodN = parseInt(p.period, 10);
+  const matchingIndices = findScheduleSlotIndices_(rows, p.classCode, dayN, periodN, p.weekType || p.week);
   const classRows = sheetToObjects_(ss.getSheetByName('班級'));
   const frozenRules = sheetToObjects_(ss.getSheetByName('科目規則'));
   const blockGroups = sheetToObjects_(ss.getSheetByName('綁班'));
   const assignments = sheetToObjects_(ss.getSheetByName('配課'));
-  const matchingIndices = findScheduleSlotIndices_(rows, p.classCode, dayN, periodN, p.weekType || p.week, p.subjectCode, p.assignmentNote, assignments);
   if (matchingIndices.some(index => isClearFrozenScheduleEntry_(rows[index], frozenRules, classRows))) {
     return { ok: false, blocked: true, error: '凍結課程不可清除，請先解除固定設定' };
   }
   if (matchingIndices.length === 0) return { ok: true, scheduleRevision: scheduleRevision_(rows) };
 
-  const bindEntry = matchingIndices.map(index => rows[index]).find(row => getBindGroupCohortForEntry_(row, blockGroups, assignments));
-  const bindCohort = bindEntry ? getBindGroupCohortForEntry_(bindEntry, blockGroups, assignments) : null;
-  const bindGroupKey = bindCohort ? bindCohortKey_(bindCohort) : '';
-  const bindCohortMembers = bindCohort ? bindCohort.members : [];
+  const bindEntry = matchingIndices.map(index => rows[index]).find(row => getBindGroupForEntry_(row, blockGroups));
+  const bindGroup = bindEntry ? getBindGroupForEntry_(bindEntry, blockGroups) : null;
+  const bindGroupKey = bindGroup ? String(bindGroup['群組ID'] || bindGroup['群組名稱'] || '') : '';
+  const bindCohortMembers = bindEntry && bindGroup
+    ? getConfiguredBindCohortMembers_(bindGroup, p.subjectCode || bindEntry['科目代碼'], p.classCode, assignments)
+    : [];
   const deleteIndices = bindEntry
     ? rows.map((row, index) => {
-        const rowCohort = getBindGroupCohortForEntry_(row, blockGroups, assignments);
+        const rowGroup = getBindGroupForEntry_(row, blockGroups);
         const sameSlot = parseInt(row['星期'], 10) === dayN && parseInt(row['節次'], 10) === periodN &&
           (!String(p.weekType || p.week || '').trim() || String(row['課堂屬性'] || '').trim() === String(p.weekType || p.week).trim()) &&
-          rowCohort && bindCohortKey_(rowCohort) === bindGroupKey &&
+          rowGroup && String(rowGroup['群組ID'] || rowGroup['群組名稱'] || '') === bindGroupKey &&
           (bindCohortMembers.length === 0 || bindCohortMembers.some(member =>
-            bindMemberKey_(member) === bindRowMemberKey_(row, assignments)
+            member.classCode === String(row['班級代碼'] || '').trim() &&
+            member.subjectCode === String(row['科目代碼'] || '').trim()
           ));
         return sameSlot ? index : -1;
       }).filter(index => index >= 0)
@@ -1213,7 +1171,6 @@ function swapCells_(ss, p) {
   const classRows = sheetToObjects_(ss.getSheetByName('班級'));
   const frozenRules = sheetToObjects_(ss.getSheetByName('科目規則'));
   const blockGroups = sheetToObjects_(ss.getSheetByName('綁班'));
-  const assignments = sheetToObjects_(ss.getSheetByName('配課'));
 
   function weekOf(slot) {
     return parseInt(slot && slot.period, 10) === 8
@@ -1222,18 +1179,12 @@ function swapCells_(ss, p) {
   }
   function find(slot) {
     const weekType = weekOf(slot);
-    const candidates = rows.map((r, index) => ({ r, index })).filter(item =>
-      String(item.r['班級代碼']) === String(slot.classCode) &&
-      parseInt(item.r['星期'], 10) === parseInt(slot.day, 10) &&
-      parseInt(item.r['節次'], 10) === parseInt(slot.period, 10) &&
-      (!weekType || String(item.r['課堂屬性'] || '').trim() === weekType)
+    return rows.findIndex(r =>
+      String(r['班級代碼']) === String(slot.classCode) &&
+      parseInt(r['星期'], 10) === parseInt(slot.day, 10) &&
+      parseInt(r['節次'], 10) === parseInt(slot.period, 10) &&
+      (!weekType || String(r['課堂屬性'] || '').trim() === weekType)
     );
-    if (Object.prototype.hasOwnProperty.call(slot || {}, 'assignmentNote')) {
-      const wantedNote = String(slot.assignmentNote || '').trim();
-      const matching = candidates.find(item => scheduleAssignmentNoteForRow_(item.r, assignments) === wantedNote);
-      return matching ? matching.index : -1;
-    }
-    return candidates.length > 0 ? candidates[0].index : -1;
   }
   const ia = find(p.a);
   const ib = find(p.b);
@@ -1289,24 +1240,27 @@ function lockCell_(ss, p) {
   const periodN = parseInt(p.period, 10);
   const subjectCode = String(p.subjectCode || '').trim();
   const weekType = periodN === 8 ? String(p.weekType || '').trim() : '';
-  const assignments = sheetToObjects_(ss.getSheetByName('配課'));
-  const hasAssignmentNote = Object.prototype.hasOwnProperty.call(p || {}, 'assignmentNote');
-  const assignmentNote = String(p.assignmentNote || '').trim();
   const idx   = rows.findIndex(r =>
     String(r['班級代碼']) === String(p.classCode) &&
     parseInt(r['星期'], 10) === dayN &&
     parseInt(r['節次'], 10) === periodN &&
     (!subjectCode || String(r['科目代碼'] || '').trim() === subjectCode) &&
-    (periodN !== 8 || !weekType || String(r['課堂屬性'] || '').trim() === weekType) &&
-    (!hasAssignmentNote || scheduleAssignmentNoteForRow_(r, assignments) === assignmentNote)
+    (periodN !== 8 || !weekType || String(r['課堂屬性'] || '').trim() === weekType)
   );
   if (idx < 0) return { ok: false, error: '此格沒有課程' };
   const targetRow = rows[idx];
   const blockGroups = sheetToObjects_(ss.getSheetByName('綁班'));
-  const bindCohort = getBindGroupCohortForEntry_(targetRow, blockGroups, assignments);
+  const assignments = sheetToObjects_(ss.getSheetByName('配課'));
+  const bindGroup = getBindGroupForEntry_(targetRow, blockGroups);
   let targetIndices = [idx];
-  if (bindCohort) {
-    const expectedKeys = bindCohort.members.map(bindMemberKey_);
+  if (bindGroup) {
+    const members = getConfiguredBindCohortMembers_(
+      bindGroup,
+      String(targetRow['科目代碼'] || '').trim(),
+      String(targetRow['班級代碼'] || '').trim(),
+      assignments
+    );
+    const expectedKeys = members.map(member => member.classCode + '|' + member.subjectCode);
     const expectedKeySet = new Set(expectedKeys);
     const indexByKey = new Map();
     let duplicate = false;
@@ -1314,7 +1268,7 @@ function lockCell_(ss, p) {
       if (String(row['星期'] || '') !== String(targetRow['星期'] || '') ||
           parseInt(row['節次'], 10) !== periodN ||
           (periodN === 8 && String(row['課堂屬性'] || '').trim() !== String(targetRow['課堂屬性'] || '').trim())) return;
-       const key = bindRowMemberKey_(row, assignments);
+      const key = String(row['班級代碼'] || '').trim() + '|' + String(row['科目代碼'] || '').trim();
       if (!expectedKeySet.has(key)) return;
       if (indexByKey.has(key)) duplicate = true;
       indexByKey.set(key, rowIndex);
@@ -2083,16 +2037,15 @@ function savePatrolSchedule_(ss, payload) {
     }
     if (schedule.length) {
       const rows = schedule.map(row => [
-         row['課表ID'] || genId_(),
-         String(row['班級代碼'] || ''),
-         parseInt(row['星期'], 10),
-         parseInt(row['節次'], 10),
-          String(row['科目代碼'] || ''),
-           Array.isArray(row['教師姓名']) ? JSON.stringify(row['教師姓名']) : String(row['教師姓名'] || ''),
-           String(row['課堂屬性'] || '一般'),
-           row['是否鎖定'] === 'TRUE' || row['是否鎖定'] === true ? 'TRUE' : 'FALSE',
-           String(row['備註'] || '')
-         ]);
+        row['課表ID'] || genId_(),
+        String(row['班級代碼'] || ''),
+        parseInt(row['星期'], 10),
+        parseInt(row['節次'], 10),
+         String(row['科目代碼'] || ''),
+         Array.isArray(row['教師姓名']) ? JSON.stringify(row['教師姓名']) : String(row['教師姓名'] || ''),
+         String(row['課堂屬性'] || '一般'),
+         row['是否鎖定'] === 'TRUE' || row['是否鎖定'] === true ? 'TRUE' : 'FALSE'
+       ]);
       sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
     }
     const savedRows = sheetToObjects_(sheet);
@@ -2474,79 +2427,15 @@ function getConfiguredBindMembers_(group, assignments) {
   return members;
 }
 
-function getBindAssignmentVariants_(classCode, subjectCode, assignments) {
-  const seenNotes = {};
-  const variants = [];
-  (Array.isArray(assignments) ? assignments : [])
-    .filter(assignment =>
-      String(assignment['班級代碼'] || '').trim() === String(classCode || '').trim() &&
-      String(assignment['科目代碼'] || '').trim() === String(subjectCode || '').trim()
-    )
-    .forEach(assignment => {
-      const assignmentNote = String(assignment['備註'] || '').trim();
-      if (seenNotes[assignmentNote]) return;
-      seenNotes[assignmentNote] = true;
-      variants.push({
-        assignmentNote,
-        assignmentGroupKey: String(classCode || '').trim() + '|' +
-          String(subjectCode || '').trim() + '|' + assignmentNote
-      });
-    });
-  return variants.length > 0 ? variants : [{ assignmentNote: '', assignmentGroupKey: '' }];
-}
-
-function getConfiguredBindCohorts_(group, assignments) {
-  const baseMembers = getConfiguredBindMembers_(group, assignments);
-  const byClass = {};
-  baseMembers.forEach(member => {
-    if (!byClass[member.classCode]) byClass[member.classCode] = [];
-    byClass[member.classCode].push(member);
-  });
-  const classCohorts = {};
-  const classCodes = Object.keys(byClass);
-  let maxCohorts = 0;
-  classCodes.forEach(classCode => {
-    const members = byClass[classCode];
-    const variantLists = members.map(member =>
-      getBindAssignmentVariants_(member.classCode, member.subjectCode, assignments)
-    );
-    const cohortCount = Math.max(1, ...variantLists.map(variants => variants.length));
-    maxCohorts = Math.max(maxCohorts, cohortCount);
-    classCohorts[classCode] = Array.from({ length: cohortCount }, (_, cohortIndex) =>
-      members.map((member, memberIndex) => {
-        const variant = variantLists[memberIndex][cohortIndex];
-        return variant ? Object.assign({}, member, variant) : null;
-      }).filter(Boolean)
-    );
-  });
-  return Array.from({ length: maxCohorts }, (_, cohortIndex) => ({
-    cohortIndex,
-    members: classCodes.reduce((result, classCode) =>
-      result.concat(classCohorts[classCode]?.[cohortIndex] || []), [])
-  })).filter(cohort => [...new Set(cohort.members.map(member => member.classCode))].length >= 2);
-}
-
-function getConfiguredBindCohortMembers_(group, subjectCode, classCode, assignments, assignmentNote) {
-  const targetSubject = String(subjectCode || '').trim();
-  const targetClass = String(classCode || '').trim();
-  const requestedNote = String(assignmentNote || '').trim();
-  const cohorts = getConfiguredBindCohorts_(group, assignments);
-  const cohort = cohorts.find(candidate => candidate.members.some(member =>
-    member.classCode === targetClass &&
-    member.subjectCode === targetSubject &&
-    (!requestedNote || member.assignmentNote === requestedNote)
-  ));
-  if (cohort) return cohort.members;
-  if (requestedNote) return [];
-
+function getConfiguredBindCohortMembers_(group, subjectCode, classCode, assignments) {
   const members = getConfiguredBindMembers_(group, assignments);
   const byClass = {};
   members.forEach(member => {
     if (!byClass[member.classCode]) byClass[member.classCode] = [];
     byClass[member.classCode].push(member);
   });
-  const targetMembers = byClass[targetClass] || [];
-  const targetIndex = targetMembers.findIndex(member => member.subjectCode === targetSubject);
+  const targetMembers = byClass[String(classCode || '').trim()] || [];
+  const targetIndex = targetMembers.findIndex(member => member.subjectCode === String(subjectCode || '').trim());
   if (targetIndex < 0) return [];
   return Object.keys(byClass).map(key => byClass[key][targetIndex]).filter(Boolean);
 }
@@ -2564,48 +2453,6 @@ function getBindGroupForEntry_(entry, blockGroups) {
   }) || null;
 }
 
-function getBindGroupCohortForEntry_(entry, blockGroups, assignments) {
-  const group = getBindGroupForEntry_(entry, blockGroups);
-  if (!group) return null;
-  const subjectCode = String(entry['科目代碼'] || '').trim();
-  const classCode = String(entry['班級代碼'] || '').trim();
-  const assignmentNote = scheduleAssignmentNoteForRow_(entry, assignments || []);
-  const cohorts = getConfiguredBindCohorts_(group, assignments || []);
-  const cohort = cohorts.find(candidate => candidate.members.some(member =>
-    member.classCode === classCode &&
-    member.subjectCode === subjectCode &&
-    (!assignmentNote || member.assignmentNote === assignmentNote)
-  ));
-  if (cohort) return { group, members: cohort.members, cohortIndex: cohort.cohortIndex };
-  const fallbackMembers = getConfiguredBindCohortMembers_(group, subjectCode, classCode, assignments || [], assignmentNote);
-  if (fallbackMembers.length < 2) return null;
-  return {
-    group,
-    members: fallbackMembers,
-    cohortIndex: 0
-  };
-}
-
-function bindGroupKey_(group) {
-  return String(group && (group['群組ID'] || group['群組名稱']) || '');
-}
-
-function bindCohortKey_(cohort) {
-  return cohort ? bindGroupKey_(cohort.group) + '|C' + String(cohort.cohortIndex || 0) : '';
-}
-
-function bindMemberKey_(member) {
-  return String(member && member.classCode || '').trim() + '|' +
-    String(member && member.subjectCode || '').trim() + '|' +
-    String(member && member.assignmentNote || '').trim();
-}
-
-function bindRowMemberKey_(row, assignments) {
-  return String(row && row['班級代碼'] || '').trim() + '|' +
-    String(row && row['科目代碼'] || '').trim() + '|' +
-    scheduleAssignmentNoteForRow_(row, assignments || []);
-}
-
 function bindScheduleSlotKey_(row) {
   const period = parseInt(row['節次'], 10);
   const attr = period === 8 ? String(row['課堂屬性'] || '一般') : '一般';
@@ -2620,41 +2467,36 @@ function boundScheduleChangeCheck_(currentRows, incomingRows, blockGroups, assig
   });
   const instances = new Map();
   (currentRows || []).forEach(row => {
-    const cohort = getBindGroupCohortForEntry_(row, blockGroups, assignments || []);
+    const group = getBindGroupForEntry_(row, blockGroups);
     const id = String(row['課表ID'] || '').trim();
-    if (!cohort || !id) return;
-    const key = bindCohortKey_(cohort);
-    if (!instances.has(key)) instances.set(key, {
-      group: cohort.group,
-      cohortIndex: cohort.cohortIndex,
-      members: cohort.members,
-      rows: []
-    });
+    if (!group || !id) return;
+    const key = String(group['群組ID'] || group['群組名稱'] || '');
+    if (!instances.has(key)) instances.set(key, { group, rows: [] });
     instances.get(key).rows.push(row);
   });
 
   for (const instance of instances.values()) {
-    const groupKey = bindGroupKey_(instance.group);
-    const expectedCohortKey = bindCohortKey_(instance);
+    const groupKey = String(instance.group['群組ID'] || instance.group['群組名稱'] || '');
     const incomingGroupRows = (incomingRows || []).filter(row => {
-      const cohort = getBindGroupCohortForEntry_(row, blockGroups, assignments || []);
-      return cohort && bindGroupKey_(cohort.group) === groupKey && bindCohortKey_(cohort) === expectedCohortKey;
+      const group = getBindGroupForEntry_(row, blockGroups);
+      return group && String(group['群組ID'] || group['群組名稱'] || '') === groupKey;
     });
     // 整組刪除是允許的；只刪掉其中一班則拒絕。
     if (incomingGroupRows.length === 0) continue;
     for (const before of instance.rows) {
       const after = incomingById.get(String(before['課表ID'] || '').trim());
-      const afterCohort = after ? getBindGroupCohortForEntry_(after, blockGroups, assignments || []) : null;
+      const afterGroup = after ? getBindGroupForEntry_(after, blockGroups) : null;
+      const afterGroupKey = afterGroup ? String(afterGroup['群組ID'] || afterGroup['群組名稱'] || '') : '';
       if (!after) {
         return { ok: false, blocked: true, error: '綁班課程不可只移動或刪除其中一班，請整組處理' };
       }
       if (String(before['班級代碼'] || '') !== String(after['班級代碼'] || '') ||
-          !afterCohort || bindCohortKey_(afterCohort) !== expectedCohortKey) {
+          !afterGroup || afterGroupKey !== groupKey) {
         return { ok: false, blocked: true, error: '綁班課程的班級或綁班群組不可被單獨改動' };
       }
     }
 
-    const members = instance.members || [];
+    const members = getConfiguredBindMembers_(instance.group, assignments);
     const expectedClasses = [...new Set(members.map(member => member.classCode))];
     const incomingByClass = new Map(expectedClasses.map(classCode => [classCode, []]));
     incomingGroupRows.forEach(row => {
@@ -2693,11 +2535,10 @@ function frozenScheduleEntryMatches_(before, after) {
   return String(beforeRow['班級代碼'] || '') === String(afterRow['班級代碼'] || '') &&
     String(beforeRow['科目代碼'] || '') === String(afterRow['科目代碼'] || '') &&
     frozenTeacherValue_(beforeRow['教師姓名']) === frozenTeacherValue_(afterRow['教師姓名']) &&
-      parseInt(beforeRow['星期'], 10) === parseInt(afterRow['星期'], 10) &&
-      parseInt(beforeRow['節次'], 10) === parseInt(afterRow['節次'], 10) &&
-      String(beforeRow['課堂屬性'] || '一般') === String(afterRow['課堂屬性'] || '一般') &&
-      String(beforeRow['備註'] || '') === String(afterRow['備註'] || '') &&
-      String(beforeRow['是否鎖定'] || '').toUpperCase() === String(afterRow['是否鎖定'] || '').toUpperCase();
+    parseInt(beforeRow['星期'], 10) === parseInt(afterRow['星期'], 10) &&
+     parseInt(beforeRow['節次'], 10) === parseInt(afterRow['節次'], 10) &&
+     String(beforeRow['課堂屬性'] || '一般') === String(afterRow['課堂屬性'] || '一般') &&
+     String(beforeRow['是否鎖定'] || '').toUpperCase() === String(afterRow['是否鎖定'] || '').toUpperCase();
 }
 
 function scheduleRowSlotKey_(row) {
@@ -2709,37 +2550,35 @@ function scheduleRowSlotKey_(row) {
 function validateBindSnapshot_(schedule, blockGroups, assignments) {
   const errors = [];
   const groupRows = new Map();
+  const groupKey = group => String(group['群組ID'] || group['群組名稱'] || '');
   (schedule || []).forEach(row => {
-    const cohort = getBindGroupCohortForEntry_(row, blockGroups, assignments || []);
-    if (!cohort) return;
-    const key = bindCohortKey_(cohort);
-    if (!groupRows.has(key)) groupRows.set(key, {
-      group: cohort.group,
-      cohortIndex: cohort.cohortIndex,
-      members: cohort.members,
-      rows: []
-    });
+    const group = getBindGroupForEntry_(row, blockGroups);
+    if (!group) return;
+    const key = groupKey(group);
+    if (!groupRows.has(key)) groupRows.set(key, { group, rows: [] });
     groupRows.get(key).rows.push(row);
   });
 
   groupRows.forEach(instance => {
-    const members = instance.members || [];
+    const members = getConfiguredBindMembers_(instance.group, assignments);
     const expectedClasses = [...new Set(members.map(member => member.classCode))];
     const byClass = new Map(expectedClasses.map(classCode => [classCode, new Set()]));
     const memberByClass = new Map();
     members.forEach(member => {
       if (!memberByClass.has(member.classCode)) memberByClass.set(member.classCode, new Set());
-      memberByClass.get(member.classCode).add(bindMemberKey_(member));
+      memberByClass.get(member.classCode).add(member.subjectCode);
     });
     instance.rows.forEach(row => {
       const classCode = String(row['班級代碼'] || '').trim();
-      if (!byClass.has(classCode) || !memberByClass.get(classCode)?.has(bindRowMemberKey_(row, assignments))) return;
+      const subjectCode = String(row['科目代碼'] || '').trim();
+      if (!byClass.has(classCode) || !memberByClass.get(classCode)?.has(subjectCode)) return;
       byClass.get(classCode).add(bindScheduleSlotKey_(row));
     });
     const lockStates = new Map();
     instance.rows.forEach(row => {
       const classCode = String(row['班級代碼'] || '').trim();
-      if (!byClass.has(classCode) || !memberByClass.get(classCode)?.has(bindRowMemberKey_(row, assignments))) return;
+      const subjectCode = String(row['科目代碼'] || '').trim();
+      if (!byClass.has(classCode) || !memberByClass.get(classCode)?.has(subjectCode)) return;
       const slot = bindScheduleSlotKey_(row);
       if (!lockStates.has(slot)) lockStates.set(slot, new Set());
       lockStates.get(slot).add(String(row['是否鎖定'] || '').toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE');
@@ -2868,23 +2707,12 @@ function validateScheduleSnapshot_(schedule, data) {
     } else {
       const classSlot = classCode + '|' + day + '|' + period;
       const existingClassRows = classSlotRows.get(classSlot) || [];
-      const rowGroupKey = scheduleAssignmentScopeKey_(row, assignments);
-      if (existingClassRows.some(existing => {
-        if (isAlternateWeekPair_(existing, row)) return false;
-        if (String(existing['科目代碼'] || '').trim() !== subjectCode) return true;
-        const existingGroupKey = scheduleAssignmentScopeKey_(existing, assignments);
-        return rowGroupKey === 'class-subject' || existingGroupKey === 'class-subject' || rowGroupKey === existingGroupKey;
-      })) {
+      if (existingClassRows.some(existing => !isAlternateWeekPair_(existing, row))) {
         addManualConstraintError('班級衝堂：' + classCode + ' 星期' + day + '第' + period + '節');
       }
       existingClassRows.push(row);
       classSlotRows.set(classSlot, existingClassRows);
-      const classSubjectDayKey = JSON.stringify([
-        classCode,
-        subjectCode,
-        scheduleAssignmentScopeKey_(row, assignments),
-        day
-      ]);
+      const classSubjectDayKey = classCode + '|' + subjectCode + '|' + day;
       classSubjectDaySlots.set(classSubjectDayKey, (classSubjectDaySlots.get(classSubjectDayKey) || 0) + 1);
       if (!classSubjectDayPeriods.has(classSubjectDayKey)) classSubjectDayPeriods.set(classSubjectDayKey, new Set());
       classSubjectDayPeriods.get(classSubjectDayKey).add(period);
@@ -2957,7 +2785,7 @@ function validateScheduleSnapshot_(schedule, data) {
 
   classSubjectDaySlots.forEach((count, key) => {
     if (count < 2) return;
-    const parts = JSON.parse(key);
+    const parts = key.split('|');
     const rowsForDay = classSubjectDayRows.get(key) || [];
     const hasRealDuplicate = rowsForDay.some((row, index) =>
       rowsForDay.slice(index + 1).some(other => !isAlternateWeekPair_(row, other))
@@ -2968,8 +2796,8 @@ function validateScheduleSnapshot_(schedule, data) {
     ));
     const periods = new Set(overlappingRows.map(row => parseInt(row['節次'], 10)));
     const lockedBlockOnly = overlappingRows.length > 0 && overlappingRows.every(row => isLockedConsecutiveScheduleEntry_(row, rows));
-    if (lockedBlockOnly || isAllowedMandatorySameDayBlock_(parts[1], parts[0], parts[3], Array.from(periods), subjectRules, classes)) return;
-     addManualConstraintError('同班同科同日重複：' + parts[0] + ' ' + parts[1] + ' 星期' + parts[3] + '（' + overlappingRows.length + '節）');
+    if (lockedBlockOnly || isAllowedMandatorySameDayBlock_(parts[1], parts[0], parts[2], Array.from(periods), subjectRules, classes)) return;
+     addManualConstraintError('同班同科同日重複：' + parts[0] + ' ' + parts[1] + ' 星期' + parts[2] + '（' + overlappingRows.length + '節）');
   });
 
   teacherSlots.forEach((items, key) => {
@@ -3232,12 +3060,11 @@ function batchUpdateScheduleLocked_(ss, payload) {
       String(r['班級代碼'] || ''),
       parseInt(r['星期'], 10),
       period,
-       String(r['科目代碼'] || ''),
-       (Array.isArray(r['教師姓名']) ? JSON.stringify(r['教師姓名']) : String(r['教師姓名'] || '')),
-       attr,
-       (r['是否鎖定'] === 'TRUE' || r['是否鎖定'] === true) ? 'TRUE' : 'FALSE',
-       String(r['備註'] || '')
-     ];
+      String(r['科目代碼'] || ''),
+      (Array.isArray(r['教師姓名']) ? JSON.stringify(r['教師姓名']) : String(r['教師姓名'] || '')),
+      attr,
+      (r['是否鎖定'] === 'TRUE' || r['是否鎖定'] === true) ? 'TRUE' : 'FALSE'
+    ];
   });
 
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
@@ -3247,7 +3074,7 @@ function batchUpdateScheduleLocked_(ss, payload) {
 // ===== 教師不排課：集中時段陣列（僅限新版資料） =====
 const __ensureAllSheetsLegacy = ensureAllSheets_;
 ensureAllSheets_ = function(ss) {
-  const result = __ensureAllSheetsLegacy(ss);
+  __ensureAllSheetsLegacy(ss);
   const sheet = ss.getSheetByName('不排課');
   const headers = SHEET_DEFS['不排課'].headers;
   const actual = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getDisplayValues()[0];
@@ -3255,7 +3082,6 @@ ensureAllSheets_ = function(ss) {
     throw new Error('教師不排課資料表為舊格式；測試階段請重新初始化資料庫後再使用新版時段陣列。');
   }
   sheet.getRange('C:C').setNumberFormat('@');
-  return result || {};
 };
 
 function parseTeacherBlockPairs_(pairs) {

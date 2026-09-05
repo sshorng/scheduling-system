@@ -25,94 +25,14 @@
     return Number.isFinite(parsed) && (Math.abs(parsed - 0.5) < 0.000001 || (Number.isInteger(parsed) && parsed >= 1 && parsed <= 20));
   };
 
-  const runtimeAssignmentGroupKey = assignment => typeof getAssignmentGroupKey === 'function'
-    ? getAssignmentGroupKey(assignment)
-    : String(assignment?.['班級代碼'] || '').trim() + '|' +
-      String(assignment?.['科目代碼'] || '').trim() + '|' +
-      String(assignment?.['備註'] || '').trim();
-  const runtimeAssignmentGroupLabel = assignment => String(assignment?.['備註'] || '').trim();
-  const runtimeAssignmentTeacherSignature = assignment => {
-    const codes = typeof getCellTeacherCodes === 'function'
-      ? getCellTeacherCodes(assignment)
-      : String(assignment?.['教師姓名'] || '').split(/[,，、;；]/).map(code => code.trim()).filter(Boolean);
-    return [...new Set(codes)].sort().join('|');
-  };
-  const runtimeScheduleEntryMatchesAssignment = (entry, assignment) => {
-    if (typeof scheduleEntryMatchesAssignment === 'function') return scheduleEntryMatchesAssignment(entry, assignment);
-    const storedNote = String(entry?.['備註'] || '').trim();
-    return String(entry?.['班級代碼'] || '').trim() === String(assignment?.['班級代碼'] || '').trim() &&
-      String(entry?.['科目代碼'] || '').trim() === String(assignment?.['科目代碼'] || '').trim() &&
-      (!storedNote || storedNote === String(assignment?.['備註'] || '').trim()) &&
-      runtimeAssignmentTeacherSignature(entry) === runtimeAssignmentTeacherSignature(assignment);
-  };
-  const runtimeAssignmentGroupKeysForScheduleEntry = (entry, assignments = state.assignments) => {
-    if (typeof getAssignmentGroupKeysForScheduleEntry === 'function') {
-      return getAssignmentGroupKeysForScheduleEntry(entry, assignments);
-    }
-    const classCode = String(entry?.['班級代碼'] || '').trim();
-    const subjectCode = String(entry?.['科目代碼'] || '').trim();
-    const candidates = (Array.isArray(assignments) ? assignments : []).filter(assignment =>
-      String(assignment['班級代碼'] || '').trim() === classCode &&
-      String(assignment['科目代碼'] || '').trim() === subjectCode
-    );
-    const exact = candidates.filter(assignment => runtimeScheduleEntryMatchesAssignment(entry, assignment));
-    if (exact.length > 0) return [...new Set(exact.map(runtimeAssignmentGroupKey).filter(Boolean))];
-    return candidates.length === 1 ? [runtimeAssignmentGroupKey(candidates[0])] : [];
-  };
-  const runtimeAssignmentGroupConflict = (candidate, assignments = state.assignments) => {
-    return null;
-  };
-  const runtimeAssignmentGroupWarnings = assignments => {
-    return [];
-  };
-
   const isHelperSubjectCodeForCount = value => /輔$/i.test(String(value || '').trim());
 
   const baseBuildIndex = buildIndex;
   buildIndex = function () {
-    const groupKeyOf = assignment => typeof getAssignmentGroupKey === 'function'
-      ? getAssignmentGroupKey(assignment)
-      : String(assignment?.['班級代碼'] || '').trim() + '|' +
-        String(assignment?.['科目代碼'] || '').trim() + '|' +
-        String(assignment?.['備註'] || '').trim();
-    const scheduleMatchesAssignment = (entry, assignment) => {
-      if (typeof scheduleEntryMatchesAssignment === 'function') return scheduleEntryMatchesAssignment(entry, assignment);
-      if (String(entry?.['班級代碼'] || '').trim() !== String(assignment?.['班級代碼'] || '').trim() ||
-          String(entry?.['科目代碼'] || '').trim() !== String(assignment?.['科目代碼'] || '').trim()) return false;
-      const storedNote = String(entry?.['備註'] || '').trim();
-      if (storedNote && storedNote !== String(assignment?.['備註'] || '').trim()) return false;
-      const entryCodes = typeof getCellTeacherCodes === 'function'
-        ? getCellTeacherCodes(entry).map(code => String(code || '').trim()).filter(Boolean)
-        : String(entry?.['教師姓名'] || '').split(/[,，、;；]/).map(code => code.trim()).filter(Boolean);
-      const assignmentCodes = typeof getCellTeacherCodes === 'function'
-        ? getCellTeacherCodes(assignment).map(code => String(code || '').trim()).filter(Boolean)
-        : String(assignment?.['教師姓名'] || '').split(/[,，、;；]/).map(code => code.trim()).filter(Boolean);
-      return assignmentCodes.length === 0 || assignmentCodes.some(code => entryCodes.includes(code));
-    };
-    const groupKeysForEntry = (entry, assignments) => {
-      const explicitGroupKey = String(entry?.__assignmentGroupKey || '').trim();
-      if (explicitGroupKey) return [explicitGroupKey];
-      const classCode = String(entry?.['班級代碼'] || '').trim();
-      const subjectCode = String(entry?.['科目代碼'] || '').trim();
-      const candidates = (assignments || []).filter(assignment =>
-        String(assignment['班級代碼'] || '').trim() === classCode &&
-        String(assignment['科目代碼'] || '').trim() === subjectCode
-      );
-      const exact = candidates.filter(assignment => scheduleMatchesAssignment(entry, assignment));
-      if (exact.length > 0) return [...new Set(exact.map(groupKeyOf).filter(Boolean))];
-      return candidates.length === 1 ? [groupKeyOf(candidates[0])] : [];
-    };
-    const groupWarningsOf = assignments => {
-      return [];
-    };
     baseBuildIndex();
     idx.homeroomTeacherByClass = Object.create(null);
     idx.assignmentsByTeacher = Object.create(null);
     idx.assignmentsByClass = Object.create(null);
-    idx.assignmentsByClassSubject = Object.create(null);
-    idx.assignmentsByGroupKey = Object.create(null);
-    idx.scheduleCountByAssignmentGroup = Object.create(null);
-    idx.assignmentGroupWarnings = [];
     idx.scheduleCountByTeacher = Object.create(null);
     idx.scheduleCountByClass = Object.create(null);
     idx.scheduleCountByTeacherClassSubject = Object.create(null);
@@ -163,9 +83,6 @@
       const classCode = String(assignment['班級代碼'] || '');
       const subjectCode = String(assignment['科目代碼'] || '');
       if (classCode) (idx.assignmentsByClass[classCode] ||= []).push(assignment);
-      const groupKey = groupKeyOf(assignment);
-      if (classCode && subjectCode) (idx.assignmentsByClassSubject[classCode + '|' + subjectCode] ||= []).push(assignment);
-      if (groupKey) (idx.assignmentsByGroupKey[groupKey] ||= []).push(assignment);
       teacherCodes.forEach(teacherCode => {
         (idx.assignmentsByTeacher[teacherCode] ||= []).push(assignment);
         if (!classCode || !subjectCode) return;
@@ -183,7 +100,6 @@
         weeklyUnits[unitKey] = Math.max(weeklyUnits[unitKey] || 0, weekly);
       });
     });
-    idx.assignmentGroupWarnings = groupWarningsOf(state.assignments);
     Object.entries(weeklyUnits).forEach(([unitKey, weekly]) => {
       const teacherCode = unitKey.split('|')[0];
       idx.assignedWeeklyByTeacher[teacherCode] = (idx.assignedWeeklyByTeacher[teacherCode] || 0) + weekly;
@@ -224,13 +140,10 @@
           idx.scheduleCountByTeacherClassSubject[key] = (idx.scheduleCountByTeacherClassSubject[key] || 0) + scheduleUnits;
         });
       }
-       if (classCode && subjectCode) {
-         const key = classCode+'|'+subjectCode;
+      if (classCode && subjectCode) {
+        const key = classCode+'|'+subjectCode;
          idx.scheduleCountByClassSubject[key] = (idx.scheduleCountByClassSubject[key] || 0) + scheduleUnits;
-         groupKeysForEntry(item, state.assignments).forEach(groupKey => {
-           idx.scheduleCountByAssignmentGroup[groupKey] = (idx.scheduleCountByAssignmentGroup[groupKey] || 0) + scheduleUnits;
-         });
-       }
+      }
     });
     Object.entries(scheduledUnitsByTeacherSlot).forEach(([key, units]) => {
       const teacherCode = key.split('|')[0];
@@ -395,25 +308,24 @@
      const weekly = get('weekly');
       if (!runtimeIsValidWeeklyInput(weekly)) { toast('每週節數請留白、填 0.5，或填 1 至 20 的整數', 'warning'); return; }
      const existing = state.assignments.find(item => String(item['配課ID'] || '') === String(id));
-     const data = {
-       ...(existing || {}),
-       '配課ID': id,
-       '班級代碼': cls,
-       '科目代碼': sub,
-       '教師姓名': teacher,
-       '課程屬性': get('courseAttr'),
-       '每週節數': weekly,
-       '備註': get('note')
-     };
-     bgSync({
+    const data = {
+      ...(existing || {}),
+      '配課ID': id,
+      '班級代碼': cls,
+      '科目代碼': sub,
+      '教師姓名': teacher,
+      '課程屬性': get('courseAttr'),
+      '每週節數': weekly,
+      '備註': get('note')
+    };
+    bgSync({
       actionName: '儲存配課資料',
       applyLocal: () => {
         const index = state.assignments.findIndex(item => String(item['配課ID'] || '') === String(id));
-         if (index >= 0) state.assignments[index] = data;
-         else state.assignments.push(data);
-         ui.inlineAssignmentId = null;
-         if (typeof buildIndex === 'function') buildIndex();
-         if (typeof renderAssignmentConfigList === 'function') renderAssignmentConfigList();
+        if (index >= 0) state.assignments[index] = data;
+        else state.assignments.push(data);
+        ui.inlineAssignmentId = null;
+        if (typeof renderAssignmentConfigList === 'function') renderAssignmentConfigList();
       },
       gasTask: () => gasPost('saveMeta', { type: '配課', data }),
       rollbackLocal: () => {
@@ -631,10 +543,6 @@
     if (!tbody || !thead) return;
     const filterText = String(document.getElementById('asgn-class-filter')?.value || '').trim().toLowerCase();
     const jsArg = value => "decodeURIComponent('" + encodeURIComponent(String(value || '')) + "')";
-    const groupKeyOf = assignment => typeof getAssignmentGroupKey === 'function'
-      ? getAssignmentGroupKey(assignment)
-      : String(assignment?.['班級代碼'] || '').trim() + '|' + String(assignment?.['科目代碼'] || '').trim() + '|' + String(assignment?.['備註'] || '').trim();
-    const groupLabelOf = assignment => String(assignment?.['備註'] || '').trim();
 
     const subjectColumns = state.subjects.map(subject => ({
       code: String(subject['科目代碼'] || '').trim(),
@@ -723,56 +631,42 @@
       });
 
        const searchableText = [classCode, className, ...Array.from(applicableSubjectCodes), ...classAssignments.flatMap(assignment =>
-          [groupLabelOf(assignment), ...assignmentTeacherItems(assignment).map(item => teacherLabel(item.code, item.tag))]
-        )].join(' ').toLowerCase();
+         assignmentTeacherItems(assignment).map(item => teacherLabel(item.code, item.tag))
+       )].join(' ').toLowerCase();
       if (filterText && !searchableText.includes(filterText)) return '';
       visibleClassCount++;
 
       let totalAssignedWeekly = 0;
-       const cellsHtml = subjectColumns.map(column => {
-         const assignments = assignmentsBySubject.get(column.code) || [];
-         const defaultWeekly = getSubjectWeeklyValue(column.subject, 3);
-         const applicable = applicableSubjectCodes.has(column.code);
-         const firstAssignment = assignments[0];
-         const preplanned = assignments.some(assignment => typeof isPreplannedCourse === 'function' && isPreplannedCourse(assignment['課程屬性']));
+      const cellsHtml = subjectColumns.map(column => {
+        const assignments = assignmentsBySubject.get(column.code) || [];
+       const defaultWeekly = getSubjectWeeklyValue(column.subject, 3);
+        const applicable = applicableSubjectCodes.has(column.code);
+        const teacherItems = assignments.flatMap(assignmentTeacherItems);
+        const teacherNames = [...new Map(teacherItems.map(item => [item.code + '|' + item.tag, teacherLabel(item.code, item.tag)])).values()].filter(Boolean);
+        const firstAssignment = assignments[0];
+        const preplanned = assignments.some(assignment => typeof isPreplannedCourse === 'function' && isPreplannedCourse(assignment['課程屬性']));
+        const cellClick = (applicable || assignments.length > 0)
+          ? ' onclick="openMatrixAssignmentEditor(' + jsArg(classCode) + ',' + jsArg(column.code) + ',' + jsArg(firstAssignment?.['配課ID'] || '') + ')" tabindex="0" role="button"'
+          : '';
+       const weekly = getAssignmentWeeklyValue(firstAssignment, column.subject, defaultWeekly);
 
-         if (assignments.length > 0 && !isHelperSubjectCodeForCount(column.code)) {
-           totalAssignedWeekly += assignments.reduce((total, assignment) => {
-              return total + getAssignmentWeeklyValue(assignment, column.subject, defaultWeekly);
-           }, 0);
-         }
-         if (assignments.length > 0) {
-           const assignmentRows = assignments.map(assignment => {
-             const teacherNames = assignmentTeacherItems(assignment).map(item => teacherLabel(item.code, item.tag)).filter(Boolean);
-             const weekly = getAssignmentWeeklyValue(assignment, column.subject, defaultWeekly);
-              const scheduled = Object.prototype.hasOwnProperty.call(idx.scheduleCountByAssignmentGroup || {}, groupKeyOf(assignment))
-                ? idx.scheduleCountByAssignmentGroup[groupKeyOf(assignment)]
-               : (idx.scheduleCountByClassSubject?.[classCode + '|' + column.code] || 0);
-              const note = groupLabelOf(assignment);
-             const assignmentPreplanned = typeof isPreplannedCourse === 'function' && isPreplannedCourse(assignment['課程屬性']);
-             const teacherText = teacherNames.length > 0 ? teacherNames.join('／') : '未指定教師';
-             const label = [teacherText, note ? '備註：' + note : '', '每週' + formatWeeklyValue(weekly) + '節', formatWeeklyValue(scheduled) + '節已排'].filter(Boolean).join('；');
-             return '<button type="button" class="asgn-matrix-assignment-row' + (assignmentPreplanned ? ' is-preplanned' : '') + '" onclick="openMatrixAssignmentEditor(' + jsArg(classCode) + ',' + jsArg(column.code) + ',' + jsArg(assignment['配課ID'] || '') + ')" title="' + esc(label) + '">' +
-               '<span class="asgn-matrix-teacher">' + esc(teacherText) + '</span>' +
-               (note ? '<span class="asgn-matrix-group">' + esc(note) + '</span>' : '') +
-               '<span class="asgn-matrix-assignment-weekly">' + esc(formatWeeklyValue(scheduled) + '/' + formatWeeklyValue(weekly) + '節') + '</span>' +
-               (assignmentPreplanned ? '<span class="asgn-matrix-course-attr">預排</span>' : '') +
-               '</button>';
-           }).join('');
-           const title = column.code + '：' + assignments.map(assignment => {
-              const note = groupLabelOf(assignment);
-             return note ? '備註：' + note : '未分組';
-           }).join('／');
-           return '<td class="asgn-matrix-cell ' + (assignments.some(assignment => assignmentTeacherItems(assignment).length > 0) ? 'is-assigned' : 'is-unassigned') + (preplanned ? ' is-preplanned' : '') + '" title="' + esc(title) + '">' +
-             assignmentRows +
-             '<button type="button" class="asgn-matrix-add-group" onclick="openMatrixAssignmentEditor(' + jsArg(classCode) + ',' + jsArg(column.code) + ',\'\')">＋新增分組</button>' +
-             '</td>';
-         }
-         const cellClick = applicable
-           ? ' onclick="openMatrixAssignmentEditor(' + jsArg(classCode) + ',' + jsArg(column.code) + ',\'\')" tabindex="0" role="button"'
-           : '';
-         return '<td class="asgn-matrix-cell ' + (applicable ? 'is-empty' : 'is-not-applicable') + '"' + cellClick + ' title="' +
-           esc(applicable ? '尚未配課' : '不適用科目') + '"></td>';
+        if (assignments.length > 0 && !isHelperSubjectCodeForCount(column.code)) {
+          totalAssignedWeekly += assignments.reduce((total, assignment) => {
+             return total + getAssignmentWeeklyValue(assignment, column.subject, defaultWeekly);
+          }, 0);
+        }
+        if (teacherNames.length > 0) {
+           const title = column.code + '：' + teacherNames.join('／') + '，每週' + formatWeeklyValue(weekly) + '節' + (isAlternateWeeklyValue(weekly) ? '（單雙週）' : '') + (preplanned ? '，預排下學期' : '');
+          return '<td class="asgn-matrix-cell is-assigned' + (preplanned ? ' is-preplanned' : '') + '"' + cellClick + ' title="' + esc(title) + '">' +
+            teacherNames.map(name => '<span class="asgn-matrix-teacher">' + esc(name) + '</span>').join('') +
+            (preplanned ? '<span class="asgn-matrix-course-attr">預排</span>' : '') +
+            '</td>';
+        }
+        if (assignments.length > 0) {
+          return '<td class="asgn-matrix-cell is-unassigned' + (preplanned ? ' is-preplanned' : '') + '"' + cellClick + ' title="已建立配課紀錄，但尚未指定教師"></td>';
+        }
+        return '<td class="asgn-matrix-cell ' + (applicable ? 'is-empty' : 'is-not-applicable') + '"' + cellClick + ' title="' +
+          esc(applicable ? '尚未配課' : '不適用科目') + '"></td>';
       }).join('');
 
       const progressBadgeClass = totalAssignedWeekly > 0 ? 'badge-blue' : 'badge-gray';
@@ -786,11 +680,9 @@
         '</tr>';
     }).join('');
 
-     if (summary) {
-       const warningCount = (idx.assignmentGroupWarnings || []).length;
-       summary.textContent = '顯示 ' + visibleClassCount + '／' + state.classes.length + ' 班　' + subjectColumns.length + ' 科　已建立 ' + state.assignments.length + ' 筆配課' +
-         (warningCount > 0 ? '　⚠️ 有 ' + warningCount + ' 項分組辨識警告' : '');
-     }
+    if (summary) {
+      summary.textContent = '顯示 ' + visibleClassCount + '／' + state.classes.length + ' 班　' + subjectColumns.length + ' 科　已建立 ' + state.assignments.length + ' 筆配課';
+    }
     tbody.innerHTML = html || '<tr><td colspan="' + (subjectColumns.length + 3) + '" class="text-center text-muted py-3">無符合條件的班級</td></tr>';
   };
 
@@ -954,17 +846,17 @@
     const existing = target.assignmentId
       ? state.assignments.find(assignment => String(assignment['配課ID'] || '') === target.assignmentId)
       : null;
-     const data = {
-       ...(existing || {}),
-       '配課ID': existing?.['配課ID'] || ('MATRIX-' + Date.now()),
-       '班級代碼': target.classCode,
-       '科目代碼': target.subjectCode,
-       '教師姓名': teacherValue,
-       '課程屬性': String(document.getElementById('matrixAssignmentAttribute')?.value || '').trim(),
-       '每週節數': weekly,
-       '備註': String(document.getElementById('matrixAssignmentNote')?.value || '').trim()
-     };
-     const assignmentId = String(data['配課ID']);
+    const data = {
+      ...(existing || {}),
+      '配課ID': existing?.['配課ID'] || ('MATRIX-' + Date.now()),
+      '班級代碼': target.classCode,
+      '科目代碼': target.subjectCode,
+      '教師姓名': teacherValue,
+      '課程屬性': String(document.getElementById('matrixAssignmentAttribute')?.value || '').trim(),
+      '每週節數': weekly,
+      '備註': String(document.getElementById('matrixAssignmentNote')?.value || '').trim()
+    };
+    const assignmentId = String(data['配課ID']);
     const actionName = existing ? '修改配課資料' : '新增配課資料';
     window.closeMatrixAssignmentEditor();
     bgSync({
@@ -1140,29 +1032,19 @@
     const ignoredTeacherConsecutiveIds = new Set((ignoreTeacherConsecutiveIds || []).map(id => String(id || '').trim()).filter(Boolean));
     const ignoredScheduleIds = new Set((ignoreScheduleIds || []).map(id => String(id || '').trim()).filter(Boolean));
       const isHelper = code => /輔$/i.test(String(code || '').trim());
-      const alternateClassSubjectKeys = new Set((state.assignments || [])
-        .filter(assignment => isAlternateWeeklyValue(getAssignmentWeeklyValue(assignment, idx.subjectByCode?.[String(assignment['科目代碼'] || '').trim()], 3)))
-        .map(assignment => String(assignment['班級代碼'] || '').trim() + '|' + String(assignment['科目代碼'] || '').trim()));
-      const alternateAssignmentGroupKeys = new Set((state.assignments || [])
-        .filter(assignment => isAlternateWeeklyValue(getAssignmentWeeklyValue(assignment, idx.subjectByCode?.[String(assignment['科目代碼'] || '').trim()], 3)))
-        .map(runtimeAssignmentGroupKey)
-        .filter(Boolean));
-      const reportAssignmentGroupKeys = entry => runtimeAssignmentGroupKeysForScheduleEntry(entry, state.assignments);
-      const isAlternateAssignment = (classCode, subjectCode, entry = null) => {
-        const groupKeys = entry ? reportAssignmentGroupKeys(entry) : (state.assignments || [])
-          .filter(assignment => String(assignment['班級代碼'] || '').trim() === String(classCode || '').trim() &&
-            String(assignment['科目代碼'] || '').trim() === String(subjectCode || '').trim())
-          .map(runtimeAssignmentGroupKey);
-        if (groupKeys.length > 0) return groupKeys.some(groupKey => alternateAssignmentGroupKeys.has(groupKey));
-        return alternateClassSubjectKeys.has(String(classCode || '').trim() + '|' + String(subjectCode || '').trim());
-      };
+     const alternateClassSubjectKeys = new Set((state.assignments || [])
+       .filter(assignment => isAlternateWeeklyValue(getAssignmentWeeklyValue(assignment, idx.subjectByCode?.[String(assignment['科目代碼'] || '').trim()], 3)))
+       .map(assignment => String(assignment['班級代碼'] || '').trim() + '|' + String(assignment['科目代碼'] || '').trim()));
+     const isAlternateAssignment = (classCode, subjectCode) => alternateClassSubjectKeys.has(
+       String(classCode || '').trim() + '|' + String(subjectCode || '').trim()
+     );
      const isAlternateEntry = entry => {
        const period = parseInt(entry?.['節次'], 10);
        const attr = String(entry?.['課堂屬性'] || '').trim();
        return period === 8 && (attr === '單週' || attr === '雙週');
      };
      const inScope = (code, classCode = '', entry = null) => {
-        const alternate = isAlternateEntry(entry) || isAlternateAssignment(classCode, code, entry);
+       const alternate = isAlternateEntry(entry) || isAlternateAssignment(classCode, code);
        return optP8Only
          ? isHelper(code) || alternate
          : (autoEndPeriod <= 7 ? !isHelper(code) && !alternate : true);
@@ -1256,43 +1138,30 @@
     const scopedSchedule = (Array.isArray(schedule) ? schedule : []).filter(reportInScope);
     const countedSchedule = (Array.isArray(schedule) ? schedule : []).filter(reportCountedSchedule);
     const auditSchedule = scopedSchedule.filter(entry => !ignoredScheduleIds.has(String(entry?.['課表ID'] || '').trim()));
-     const required = new Map(), scheduled = new Map(), classSubjectRequired = new Map(), classSubjectScheduled = new Map(), classSubjectGroupRequired = new Map(), classSubjectGroupScheduled = new Map();
-     state.assignments.forEach(assignment => {
-       const teacherCodes=reportTeacherTokens(assignment), classCode=String(assignment['班級代碼']||''), subjectCode=String(assignment['科目代碼']||'');
-         if(!classCode||!subjectCode||!inScope(subjectCode, classCode, assignment)) return;
-        const weekly=getAssignmentWeeklyValue(assignment, idx.subjectByCode[subjectCode], 3);
-       const classSubjectKey=classCode+'|'+subjectCode;
-       const assignmentGroupKey=runtimeAssignmentGroupKey(assignment);
-       classSubjectRequired.set(classSubjectKey,(classSubjectRequired.get(classSubjectKey)||0)+weekly);
-       classSubjectGroupRequired.set(assignmentGroupKey,(classSubjectGroupRequired.get(assignmentGroupKey)||0)+weekly);
+    const required = new Map(), scheduled = new Map(), classSubjectRequired = new Map(), classSubjectScheduled = new Map();
+    state.assignments.forEach(assignment => {
+      const teacherCodes=reportTeacherTokens(assignment), classCode=String(assignment['班級代碼']||''), subjectCode=String(assignment['科目代碼']||'');
+       if(!classCode||!subjectCode||!inScope(subjectCode, classCode)) return;
+       const weekly=getAssignmentWeeklyValue(assignment, idx.subjectByCode[subjectCode], 3);
+      const classSubjectKey=classCode+'|'+subjectCode;
+      classSubjectRequired.set(classSubjectKey,(classSubjectRequired.get(classSubjectKey)||0)+weekly);
       if(teacherCodes.length === 0) return;
       teacherCodes.forEach(teacherCode => {
         const key=teacherCode+'|'+classCode+'|'+subjectCode;
         const item=required.get(key)||{teacherCode,classCode,subjectCode,required:0}; item.required+=weekly; required.set(key,item);
       });
     });
-     countedSchedule.forEach(item=>{
-       const classCode=String(item['班級代碼']||''), subjectCode=String(item['科目代碼']||'');
+    countedSchedule.forEach(item=>{
+      const classCode=String(item['班級代碼']||''), subjectCode=String(item['科目代碼']||'');
       reportTeacherIdentities(item).forEach(teacherCode=>{
         const key=teacherCode+'|'+classCode+'|'+subjectCode;
          if(required.has(key)) scheduled.set(key,(scheduled.get(key)||0)+getScheduleWeeklyUnits(item));
       });
-       const classSubjectKey=classCode+'|'+subjectCode;
-        if(classSubjectRequired.has(classSubjectKey)) classSubjectScheduled.set(classSubjectKey,(classSubjectScheduled.get(classSubjectKey)||0)+getScheduleWeeklyUnits(item));
-       reportAssignmentGroupKeys(item).forEach(assignmentGroupKey => {
-         if (classSubjectGroupRequired.has(assignmentGroupKey)) classSubjectGroupScheduled.set(assignmentGroupKey, (classSubjectGroupScheduled.get(assignmentGroupKey) || 0) + getScheduleWeeklyUnits(item));
-       });
-     });
+      const classSubjectKey=classCode+'|'+subjectCode;
+       if(classSubjectRequired.has(classSubjectKey)) classSubjectScheduled.set(classSubjectKey,(classSubjectScheduled.get(classSubjectKey)||0)+getScheduleWeeklyUnits(item));
+    });
      const deficits=[]; required.forEach((item,key)=>{const placed=Math.min(item.required,scheduled.get(key)||0);if(item.required-placed>0.000001)deficits.push({...item,scheduled:placed,remaining:item.required-placed});});
-      const violations=new Set(), classSlots=new Map(), teacherSlotItems=new Map(), teacherConsecutiveSlotItems=new Map(), roomSlotItems=new Map(), concurrent=new Map(), teacherDays=new Map(), teacherGradeDayCounts=new Map(), teacherGradePeriodGrades=new Map(), classSubjectDays=new Map(), classSubjectDayCounts=new Map(), classSubjectDayPeriods=new Map(), classSubjectDayEntries=new Map(), classSubjectGroupMeta=new Map(), classDaySubjects=new Map();
-      const classEntriesConflict = (left, right) => {
-        if (String(left?.subjectCode || '').trim() !== String(right?.subjectCode || '').trim()) return true;
-        const leftGroups = reportAssignmentGroupKeys(left.entry || left);
-        const rightGroups = reportAssignmentGroupKeys(right.entry || right);
-        if (leftGroups.length === 0 || rightGroups.length === 0) return true;
-        return leftGroups.some(groupKey => rightGroups.includes(groupKey));
-      };
-     const auditGroupSeparator = '\u001f';
+    const violations=new Set(), classSlots=new Set(), teacherSlotItems=new Map(), teacherConsecutiveSlotItems=new Map(), roomSlotItems=new Map(), concurrent=new Map(), teacherDays=new Map(), teacherGradeDayCounts=new Map(), teacherGradePeriodGrades=new Map(), classSubjectDays=new Map(), classSubjectDayCounts=new Map(), classSubjectDayPeriods=new Map(), classSubjectDayEntries=new Map(), classDaySubjects=new Map();
     auditSchedule.forEach(item=>{
       const classCode=String(item['班級代碼']||''),teacherCodes=reportTeacherTokens(item),subjectCode=String(item['科目代碼']||''),day=parseInt(item['星期'],10),period=reportPeriod(item),weekType=reportWeekType(item);
        if(!classCode||!subjectCode||!Number.isFinite(day)||!Number.isFinite(period))return;
@@ -1300,14 +1169,7 @@
        const rules=state.subjectRules.filter(rule=>ruleAppliesToSubjectAndClass(rule,subjectCode,classCode,grade));
        const isMandatory=rules.some(rule=>rule['規則類型']==='必排'&&getRuleDaysPeriods(rule).some(slot=>slot.day===day&&slot.period===period));
        const classSubjectKey=classCode+'|'+subjectCode;
-       const assignmentGroupKey = reportAssignmentGroupKeys(item)[0] || '';
-       const spreadKey = assignmentGroupKey || classSubjectKey;
-       classSubjectGroupMeta.set(spreadKey, { classCode, subjectCode, assignmentGroupKey });
-        const ck=classCode+'|'+day+'|'+period+'|'+weekType;
-        const classItems=classSlots.get(ck)||[];
-        if(classItems.some(existing => classEntriesConflict(existing, { subjectCode, entry: item }))) violations.add('班級衝堂：'+classCode+' 星期'+day+'第'+period+'節'+(weekType!=='全週'?'（'+weekType+'）':''));
-        classItems.push({ subjectCode, entry: item });
-        classSlots.set(ck, classItems);
+        const ck=classCode+'|'+day+'|'+period+'|'+weekType;if(classSlots.has(ck))violations.add('班級衝堂：'+classCode+' 星期'+day+'第'+period+'節'+(weekType!=='全週'?'（'+weekType+'）':''));classSlots.add(ck);
       teacherCodes.forEach(rawTeacherCode=>{
         const teacherCode = reportTeacherKey(rawTeacherCode);
         if(!teacherCode) return;
@@ -1329,8 +1191,7 @@
          }
         if(reportTeacherIdentities(rawTeacherCode).some(identity=>idx.blockSet.has(identity+'|'+day+'|'+period))) violations.add('教師不排課違規：'+teacherCode+' 星期'+day+'第'+period+'節');
          if(period<=7){const days=teacherDays.get(teacherCode)||[[],[],[],[],[]];if(!days[day-1].includes(period))days[day-1].push(period);teacherDays.set(teacherCode,days);}
-         const groupWeekly = classSubjectGroupRequired.get(assignmentGroupKey) || classSubjectRequired.get(classCode+'|'+subjectCode) || 0;
-         if(groupWeekly===1&&grade){
+        if((classSubjectRequired.get(classCode+'|'+subjectCode)||0)===1&&grade){
           const gradeMap=teacherGradeDayCounts.get(teacherCode)||new Map();
           const dayCounts=gradeMap.get(grade)||new Map();
           dayCounts.set(day,(dayCounts.get(day)||0)+1);
@@ -1342,7 +1203,7 @@
           dayPeriods.set(period,periodGrades);periodMap.set(day,dayPeriods);teacherGradePeriodGrades.set(teacherCode,periodMap);
         }
       });
-        const alternateCourse = isAlternateAssignment(classCode, subjectCode, item) || isAlternateEntry(item);
+       const alternateCourse = isAlternateAssignment(classCode, subjectCode) || isAlternateEntry(item);
        if(isHelper(subjectCode)&&period!==8)violations.add('課後輔導節次錯誤：'+subjectCode+'（'+classCode+'）');
        if(!isHelper(subjectCode)&&!alternateCourse&&period===8)violations.add('一般課程排入第8節：'+subjectCode+'（'+classCode+'）');
        if(alternateCourse&&(period!==8||weekType==='全週'))violations.add('0.5 節單雙週課程必須排在第8節單週或雙週：'+subjectCode+'（'+classCode+'）');
@@ -1352,8 +1213,8 @@
       const must=rules.filter(rule=>rule['規則類型']==='必排');if(must.length&&!must.some(rule=>getRuleDaysPeriods(rule).some(slot=>slot.day===day&&slot.period===period)))violations.add('科目必排違規：'+subjectCode+'（'+classCode+'）');
        const concKey=subjectCode+'|'+day+'|'+period+'|'+weekType;concurrent.set(concKey,(concurrent.get(concKey)||0)+1);
         const classDayKey=classCode+'|'+day;if(!classDaySubjects.has(classDayKey))classDaySubjects.set(classDayKey,new Set());classDaySubjects.get(classDayKey).add(subjectCode);
-         if(!classSubjectDays.has(spreadKey))classSubjectDays.set(spreadKey,new Set());classSubjectDays.get(spreadKey).add(day);
-         const dayKey=spreadKey+auditGroupSeparator+day+auditGroupSeparator+weekType;classSubjectDayCounts.set(dayKey,(classSubjectDayCounts.get(dayKey)||0)+1);if(!classSubjectDayPeriods.has(dayKey))classSubjectDayPeriods.set(dayKey,new Set());classSubjectDayPeriods.get(dayKey).add(period);if(!classSubjectDayEntries.has(dayKey))classSubjectDayEntries.set(dayKey,[]);classSubjectDayEntries.get(dayKey).push(item);
+        const spreadKey=classCode+'|'+subjectCode;if(!classSubjectDays.has(spreadKey))classSubjectDays.set(spreadKey,new Set());classSubjectDays.get(spreadKey).add(day);
+        const dayKey=spreadKey+'|'+day+'|'+weekType;classSubjectDayCounts.set(dayKey,(classSubjectDayCounts.get(dayKey)||0)+1);if(!classSubjectDayPeriods.has(dayKey))classSubjectDayPeriods.set(dayKey,new Set());classSubjectDayPeriods.get(dayKey).add(period);if(!classSubjectDayEntries.has(dayKey))classSubjectDayEntries.set(dayKey,[]);classSubjectDayEntries.get(dayKey).push(item);
      });
      const effectiveWeekTypes = entry => {
        const period = reportPeriod(entry);
@@ -1393,11 +1254,9 @@
          }
        });
      });
-      classAuditSlots.forEach((items, key) => {
-        if (items.some((item, index) => items.slice(index + 1).some(other => classEntriesConflict({ subjectCode: item['科目代碼'], entry: item }, { subjectCode: other['科目代碼'], entry: other })))) {
-          violations.add('班級衝堂：' + key.replace(/\|/g, '／'));
-        }
-      });
+     classAuditSlots.forEach((items, key) => {
+       if (items.length > 1) violations.add('班級衝堂：' + key.replace(/\|/g, '／'));
+     });
       teacherAuditSlots.forEach((items, key) => {
         if (items.length < 2 || reportAllowedCombinedClassCohort(items)) return;
         const parts = key.split('|');
@@ -1476,39 +1335,35 @@
         (assignedSubjects.length?assignedSubjects:subjectCodes).forEach(subjectCode=>members.push({classCode,subjectCode}));
        });
        return members;
-       };
-       const reportBindCohorts=group=>{
-        if(typeof getConfiguredBindCohorts==='function')return getConfiguredBindCohorts(group);
-        return [{cohortIndex:0,members:reportBindMembers(group)}];
-       };
-       (state.blockGroups||[]).forEach(group=>{
-         reportBindCohorts(group).forEach(cohort=>{
-           const members=(cohort.members||[]).filter(member=>inScope(member.subjectCode));
-           const classCodes=[...new Set(members.map(member=>String(member.classCode||'').trim()).filter(Boolean))];
-           if(classCodes.length<2)return;
-           const memberMatches=(item,member)=>
-             String(item['班級代碼']||'').trim()===String(member.classCode||'').trim()&&
-             String(item['科目代碼']||'').trim()===String(member.subjectCode||'').trim()&&
-             (!member.assignmentGroupKey||reportAssignmentGroupKeys(item).includes(member.assignmentGroupKey));
-           const signatures=classCodes.map(classCode=>{
-             const classMembers=members.filter(member=>String(member.classCode||'').trim()===classCode);
-             const slots=[...new Set(scopedSchedule.filter(item=>classMembers.some(member=>memberMatches(item,member)))
-               .map(item=>parseInt(item['星期'],10)+'-'+parseInt(item['節次'],10)+'-'+reportWeekType(item)))].sort();
-             return {classCode,signature:slots.join(','),label:slots.length?slots.join('、'):'未排'};
-           });
-           const canonical=signatures[0]?.signature||'';
-           if(signatures.some(item=>item.signature!==canonical)){
-             const notes=[...new Set(members.map(member=>String(member.assignmentNote||'').trim()).filter(Boolean))];
-             const baseLabel=String(group['群組名稱']||group['群組ID']||classCodes.join('、'));
-             const groupLabel=notes.length?baseLabel+'／'+notes.join('／'):baseLabel;
-             const details=signatures.map(item=>item.classCode+'：'+item.label).join('；');
-             violations.add('綁班不同步：'+groupLabel+'（'+details+'）');
-           }
-         });
-       });
+      };
+      (state.blockGroups||[]).forEach(group=>{
+        const members=reportBindMembers(group);
+        const classCodes=[...new Set(members.map(member=>String(member.classCode||'').trim()).filter(Boolean))];
+        if(classCodes.length<2)return;
+        const membersByClass=new Map();
+        members.filter(member=>inScope(member.subjectCode)).forEach(member=>{
+          if(!membersByClass.has(member.classCode))membersByClass.set(member.classCode,new Set());
+          membersByClass.get(member.classCode).add(member.subjectCode);
+        });
+        const activeClassCodes=[...membersByClass.keys()];
+        if(activeClassCodes.length<2)return;
+        const signatures=activeClassCodes.map(classCode=>{
+          const subjects=membersByClass.get(classCode);
+           const slots=[...new Set(scopedSchedule.filter(item=>
+             String(item['班級代碼']||'')===classCode&&subjects.has(String(item['科目代碼']||''))
+           ).map(item=>parseInt(item['星期'],10)+'-'+parseInt(item['節次'],10)+'-'+reportWeekType(item)))].sort();
+          return {classCode,signature:slots.join(','),label:slots.length?slots.join('、'):'未排'};
+        });
+        const canonical=signatures[0]?.signature||'';
+        if(signatures.some(item=>item.signature!==canonical)){
+          const groupLabel=String(group['群組名稱']||group['群組ID']||classCodes.join('、'));
+          const details=signatures.map(item=>item.classCode+'：'+item.label).join('；');
+          violations.add('綁班不同步：'+groupLabel+'（'+details+'）');
+        }
+      });
     roomSlotItems.forEach((items,key)=>{const roomCode=key.split('|')[0],capacity=parseInt(idx.roomByCode?.[roomCode]?.['容量']||'1',10)||1;if(items.length>capacity)violations.add('教室衝突：'+roomCode+' '+key.split('|')[1]+'-'+key.split('|')[2]+'（'+items.length+'/'+capacity+'）');});
     concurrent.forEach((count,key)=>{const subjectCode=key.split('|')[0],max=parseInt(idx.subjectByCode[subjectCode]?.['同時最多班數']||'0',10)||0;if(max>0&&count>max)violations.add('科目同時班數超限：'+key+'（'+count+'/'+max+'）');});
-      classSubjectDayCounts.forEach((count,key)=>{if(count<2)return;const parts=key.split(auditGroupSeparator),spreadKey=parts[0],day=parts[1],weekType=parts[2],meta=classSubjectGroupMeta.get(spreadKey)||{},classCode=meta.classCode||spreadKey.split('|')[0],subjectCode=meta.subjectCode||spreadKey.split('|')[1],groupLabel=meta.assignmentGroupKey?String(state.assignments.find(assignment=>runtimeAssignmentGroupKey(assignment)===meta.assignmentGroupKey)?.['備註']||'').trim():'',mandatorySlots=typeof getMandatoryRuleDaySlots==='function'?getMandatoryRuleDaySlots(subjectCode,classCode,Number(day)):[],allowedPeriods=new Set(mandatorySlots.map(slot=>Number(slot.period))),actualPeriods=classSubjectDayPeriods.get(key)||new Set(),entries=classSubjectDayEntries.get(key)||[],lockedBlockOnly=entries.length>0&&entries.every(entry=>isLockedConsecutiveEntry(entry,auditSchedule)),isAllowed=lockedBlockOnly||(mandatorySlots.length>1&&count===mandatorySlots.length&&actualPeriods.size===count&&[...actualPeriods].every(period=>allowedPeriods.has(period)));if(!isAllowed)violations.add('同班同科同日重複：'+classCode+' '+subjectCode+(groupLabel?'（'+groupLabel+'）':'')+' 星期'+day+(weekType!=='全週'?'（'+weekType+'）':'')+'（'+count+'節）');});
+      classSubjectDayCounts.forEach((count,key)=>{if(count<2)return;const parts=key.split('|'),classCode=parts[0],subjectCode=parts[1],day=parts[2],weekType=parts[3],mandatorySlots=typeof getMandatoryRuleDaySlots==='function'?getMandatoryRuleDaySlots(subjectCode,classCode,Number(day)):[],allowedPeriods=new Set(mandatorySlots.map(slot=>Number(slot.period))),actualPeriods=classSubjectDayPeriods.get(key)||new Set(),entries=classSubjectDayEntries.get(key)||[],lockedBlockOnly=entries.length>0&&entries.every(entry=>isLockedConsecutiveEntry(entry,auditSchedule)),isAllowed=lockedBlockOnly||(mandatorySlots.length>1&&count===mandatorySlots.length&&actualPeriods.size===count&&[...actualPeriods].every(period=>allowedPeriods.has(period)));if(!isAllowed)violations.add('同班同科同日重複：'+classCode+' '+subjectCode+' 星期'+day+(weekType!=='全週'?'（'+weekType+'）':'')+'（'+count+'節）');});
       let teacherGaps=0,teacherImbalance=0,adjacentSubjectDays=0,teacherLongStreaks=0,teacherRepeatedPeriods=0,teacherAfternoonOverload=0,teacherPairSoftViolations=0,teacherCrossGradeSameDay=0,teacherCrossGradeAdjacent=0,subjectRelationSoftViolations=0;
      const subjectRelationSoftDetails=[];
      (state.subjectRelations||[]).forEach(rule=>{
@@ -1562,11 +1417,11 @@
     classSubjectDays.forEach((set,key)=>{
       const days=[...set].sort((a,b)=>a-b);
       for(let i=1;i<days.length;i++)if(days[i]===days[i-1]+1)adjacentSubjectDays++;
-       const meta=classSubjectGroupMeta.get(key)||{},classCode=meta.classCode||key.split('|')[0],subjectCode=meta.subjectCode||key.split('|')[1],groupKey=meta.assignmentGroupKey||'';
+      const parts=key.split('|'),classCode=parts[0],subjectCode=parts[1];
       const parsedMaxDays=parseInt(idx.subjectByCode[subjectCode]?.['最多連日']||'',10);
       const maxDays=Number.isFinite(parsedMaxDays)?parsedMaxDays:0;
       if(maxDays<=0||maxDays>=5)return;
-       const weekly=classSubjectGroupRequired.get(groupKey)||classSubjectRequired.get(classCode+'|'+subjectCode)||0;
+      const weekly=classSubjectRequired.get(key)||0;
       const maxDistinctDays=5-Math.floor(5/(maxDays+1));
       if(weekly>maxDistinctDays)return;
       let streak=days.length?1:0;

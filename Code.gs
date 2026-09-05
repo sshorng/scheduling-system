@@ -11,7 +11,7 @@
 
 // ===================== 工作表定義 =====================
 
-const GAS_VERSION = '20260905_v1213_schedule_notes';
+const GAS_VERSION = '20260905_v1214_group_slot';
 const SCHEMA_VERSION = '20260905_schedule_note_v1';
 
 // 所有會改動試算表的動作共用同一把 ScriptLock，避免多視窗或快速連點互相覆寫。

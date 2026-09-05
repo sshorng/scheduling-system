@@ -1088,7 +1088,7 @@ function compressSlots(slots) {
 // GAS URL（契約 §3.C 三層優先序）
 // ============================================================
 const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycby8i5bnQ-oKZMO1HUQO6pJF6f_XQL8bQHO2Yj3nJ2D7NCzNZbe_bhks8hxTVZWWSxz7/exec";  // 已鎖定部署網址
-const FRONTEND_VERSION = '20260905_v1213_schedule_notes';
+const FRONTEND_VERSION = '20260905_v1214_group_slot';
 
 function resolveGasUrl() {
   if (DEFAULT_GAS_URL && DEFAULT_GAS_URL.trim()) return DEFAULT_GAS_URL.trim();
@@ -3126,6 +3126,25 @@ function getScheduleAssignmentNote(cell) {
   return String(matches[0]['備註'] || '').trim();
 }
 
+// 只有兩筆能唯一辨識為不同分組時，才視為同班同格可並存的另一組。
+function isDifferentAssignmentGroupAtClassSlot(cell, classCode, subjectCode, assignmentNote) {
+  const storedNote = String(cell?.['備註'] || '').trim();
+  const matchedNotes = storedNote ? [] : [...new Set(getScheduleAssignmentMatches(cell)
+    .map(assignment => String(assignment['備註'] || '').trim())
+    .filter(Boolean))];
+  const targetNote = storedNote || (matchedNotes.length === 1 ? matchedNotes[0] : '');
+  const incomingNote = String(assignmentNote || '').trim();
+  return Boolean(cell && targetNote && incomingNote && targetNote !== incomingNote &&
+    String(cell['班級代碼'] || '').trim() === String(classCode || '').trim() &&
+    String(cell['科目代碼'] || '').trim() === String(subjectCode || '').trim());
+}
+
+function getAssignmentGroupBlockingCells(cells, classCode, subjectCode, assignmentNote) {
+  return (cells || []).filter(cell =>
+    !isDifferentAssignmentGroupAtClassSlot(cell, classCode, subjectCode, assignmentNote)
+  );
+}
+
 // 全部教師代碼（主師＋多師），用於衝突／索引
 function getCellTeacherCodes(cell) {
   const list = getCellTeacherList(cell);
@@ -3820,10 +3839,13 @@ function bindTeacherTTEvents(teacherCode, target = 'primary') {
 
       if (!targetCls || !subCode) return;
 
-      const excludeInfo = ui.drag && !ui.drag.isPalette ? {
-        srcDay: ui.drag.day,
-        srcPer: ui.drag.per,
-        excludeIds: [ui.drag.cell && ui.drag.cell['課表ID']]
+      const excludeInfo = ui.drag ? {
+        srcDay: ui.drag.isPalette ? undefined : ui.drag.day,
+        srcPer: ui.drag.isPalette ? undefined : ui.drag.per,
+        excludeIds: [ui.drag.isPalette ? null : ui.drag.cell && ui.drag.cell['課表ID']],
+        assignmentNote: ui.drag.isPalette
+          ? String(ui.drag.assignmentNote || '').trim()
+          : getScheduleAssignmentNote(ui.drag.cell)
       } : null;
       const targetWeek = per === 8
         ? String(schedCells.find(cell => ['單週', '雙週'].includes(String(cell['課堂屬性'] || '').trim()))?.['課堂屬性'] || ui.drag.p8Week || '').trim()
@@ -3871,8 +3893,18 @@ function bindTeacherTTEvents(teacherCode, target = 'primary') {
       const targetWeek = per === 8
         ? String(targetTeacherCells.find(cell => ['單週', '雙週'].includes(String(cell['課堂屬性'] || '').trim()))?.['課堂屬性'] || sourceWeek).trim()
         : '';
-      const targetClassCell = getScheduleCellAt(dragInfo.cls, day, per, targetWeek);
-      if (!(await confirmTeacherTimetableOverwrite(dragInfo.cell, [targetClassCell, ...targetTeacherCells], day, per))) return;
+      const targetClassCells = getScheduleCellsAt(dragInfo.cls, day, per, targetWeek);
+      const incomingAssignmentNote = dragInfo.isPalette
+        ? String(dragInfo.assignmentNote || '').trim()
+        : getScheduleAssignmentNote(dragInfo.cell);
+      const targetClassCell = targetClassCells.find(cell =>
+        String(cell['科目代碼'] || '').trim() === String(subCode || '').trim() &&
+        String(cell['備註'] || '').trim() === incomingAssignmentNote
+      ) || targetClassCells[0] || null;
+      const targetClassConflictCell = getAssignmentGroupBlockingCells(
+        targetClassCells, dragInfo.cls, subCode, incomingAssignmentNote
+      )[0] || null;
+      if (!(await confirmTeacherTimetableOverwrite(dragInfo.cell, [targetClassConflictCell, ...targetTeacherCells], day, per))) return;
 
       if (!dragInfo.isPalette) {
         const bindPlan = buildBindMovePlan({
@@ -3898,12 +3930,12 @@ function bindTeacherTTEvents(teacherCode, target = 'primary') {
         }
       }
 
-       const excludeInfo = dragInfo && !dragInfo.isPalette ? {
-         srcDay: dragInfo.day,
-         srcPer: dragInfo.per,
-         excludeIds: [dragInfo.cell && dragInfo.cell['課表ID'], targetClassCell && targetClassCell['課表ID']],
-         assignmentNote: getScheduleAssignmentNote(dragInfo.cell)
-       } : null;
+      const excludeInfo = dragInfo ? {
+        srcDay: dragInfo.isPalette ? undefined : dragInfo.day,
+        srcPer: dragInfo.isPalette ? undefined : dragInfo.per,
+        excludeIds: [dragInfo.isPalette ? null : dragInfo.cell && dragInfo.cell['課表ID'], targetClassCell && targetClassCell['課表ID']],
+        assignmentNote: incomingAssignmentNote
+      } : null;
       const teacherValue = dragInfo.teacherList?.length ? dragInfo.teacherList : teacherCode;
       const conflicts = detectConflicts(day, per, teacherValue, subCode, dragInfo.cls, dragInfo.isPalette ? '' : dragInfo.cls, excludeInfo, targetWeek);
       const canTeacherDrop = await checkHandAdjustConflicts(conflicts, '教師課表調動');
@@ -3930,7 +3962,7 @@ function bindTeacherTTEvents(teacherCode, target = 'primary') {
         if (!srcCell) return;
 
         // 1. 檢查目標格於該班級是否已有課程（例如 801 在 (day, per) 有理化）
-        const dstClassCell = targetClassCell;
+        const dstClassCell = targetClassConflictCell;
 
         // 2. 檢查目標格於該教師是否已有其他班級課程（例如 吳美靜 在 (day, per) 有 802 童軍）
         const dstTeacherCells = targetTeacherCells;
@@ -3975,7 +4007,7 @@ function bindTeacherTTEvents(teacherCode, target = 'primary') {
           const conflicts = detectConflicts(day, per, srcCell['教師姓名'], srcCell['科目代碼'], srcCls, srcCls, moveExcludeInfo, targetWeek);
           const canMove = await checkHandAdjustConflicts(conflicts, '教師課表調動');
           if (!canMove) return;
-          await doMove(srcCls, srcDay, srcPer, srcCls, day, per, srcWeek, targetWeek, Boolean(teacherDropForce || canMove.force));
+          await doMove(srcCls, srcDay, srcPer, srcCls, day, per, srcWeek, targetWeek, Boolean(teacherDropForce || canMove.force), incomingAssignmentNote);
         }
       }
     });
@@ -4776,19 +4808,24 @@ function optimisticClearCell(classCode, day, period, weekType, subjectCode = '',
 }
 
 // 3. 樂觀移動格位（綁班強制連動移動）
-function optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcWeek, dstWeek, force = false) {
+function optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcWeek, dstWeek, force = false, requestedSourceAssignmentNote = '') {
   const srcD = parseInt(srcDay, 10), srcP = parseInt(srcPer, 10);
   const dstD = parseInt(dstDay, 10), dstP = parseInt(dstPer, 10);
 
   // 尋找來源課（第八節需比對週次屬性）
   const srcWeekKey = (srcP === 8 && srcWeek) ? srcWeek : '一般';
-  const srcCell = (idx.scheduleSlot && idx.scheduleSlot[String(srcCls) + '|' + srcD + '|' + srcP + '|' + srcWeekKey])
-    || state.schedule.find(s => {
+  const sourceNote = String(requestedSourceAssignmentNote || '').trim();
+  const sourceCells = state.schedule.filter(s => {
     if (String(s['班級代碼']) !== String(srcCls)) return false;
     if (parseInt(s['星期'], 10) !== srcD || parseInt(s['節次'], 10) !== srcP) return false;
     if (srcP === 8 && srcWeek) return (s['課堂屬性'] || '') === srcWeek;
     return true;
   });
+  const srcCell = (sourceNote
+    ? sourceCells.find(s => getScheduleAssignmentNote(s) === sourceNote)
+    : null)
+    || (idx.scheduleSlot && idx.scheduleSlot[String(srcCls) + '|' + srcD + '|' + srcP + '|' + srcWeekKey])
+    || sourceCells[0];
   if (!srcCell) return;
   if (isFrozenScheduleEntry(srcCell)) { toast('凍結課程不可移動，請先解除固定設定', 'warning'); return; }
   const subjectCode = String(srcCell['科目代碼'] || '');
@@ -4796,6 +4833,7 @@ function optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcW
   const targetAttr = dstP === 8
     ? (dstWeek || attr)
     : (isVirtualClassCode(dstCls) || isManualOnlyPeriod(dstP) ? '抽離' : attr);
+  const destinationAssignmentNote = getScheduleAssignmentNote(srcCell);
   const bindClasses = getBindGroupClasses(subjectCode, srcCls);
 
   if (bindClasses) {
@@ -4852,6 +4890,7 @@ function optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcW
     parseInt(s['星期'], 10) === dstD &&
     parseInt(s['節次'], 10) === dstP &&
     (dstP !== 8 || String(s['課堂屬性'] || '') === String(targetAttr || '一般')) &&
+    !isDifferentAssignmentGroupAtClassSlot(s, c, subjectCode, destinationAssignmentNote) &&
     isFrozenScheduleEntry(s)
   ));
   if (hasFrozenDestination) {
@@ -4868,14 +4907,21 @@ function optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcW
   }
 
   state.schedule = state.schedule.filter(s => {
-    if (keyMatches(s, srcCls, srcD, srcP, srcWeek || '')) return false;
-    if (keyMatches(s, dstCls, dstD, dstP, targetAttr)) return false;
+    if (keyMatches(s, srcCls, srcD, srcP, srcWeek || '')) {
+      const sourceId = String(srcCell['課表ID'] || '').trim();
+      if (sourceId) return String(s['課表ID'] || '').trim() !== sourceId;
+      return !(String(s['科目代碼'] || '').trim() === subjectCode &&
+        getScheduleAssignmentNote(s) === destinationAssignmentNote);
+    }
+    if (keyMatches(s, dstCls, dstD, dstP, targetAttr)) {
+      // 同班同格的另一個明確分組不是替換目標，必須保留。
+      return isDifferentAssignmentGroupAtClassSlot(s, dstCls, subjectCode, destinationAssignmentNote);
+    }
     return true;
   });
 
   // 寫入目的（一般課程只移動來源這一班）
   const tListSrc = srcCell ? getCellTeacherList(srcCell) : [];
-  const destinationAssignmentNote = getScheduleAssignmentNote(srcCell);
   const sourceAssignmentNote = destinationAssignmentNote;
   const cellObj = {
     '課表ID': 'S_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
@@ -5646,12 +5692,21 @@ function bindP8SubCellEvent(el, target = 'primary') {
 
 function highlightDropZone(el, day, per, cls) {
   const weekType = per === 8 ? String(el.dataset.week || '').trim() : '';
-  const targetCell = getScheduleCellAt(cls, day, per, weekType);
+  const targetCells = getScheduleCellsAt(cls, day, per, weekType);
+  const subCode = ui.drag.isPalette ? ui.drag.subjectCode : (ui.drag.cell ? ui.drag.cell['科目代碼'] : '');
+  const assignmentNote = ui.drag.isPalette
+    ? String(ui.drag.assignmentNote || '').trim()
+    : getScheduleAssignmentNote(ui.drag.cell);
+  const targetCell = targetCells.find(cell =>
+    String(cell['科目代碼'] || '').trim() === String(subCode || '').trim() &&
+    String(cell['備註'] || '').trim() === assignmentNote
+  ) || targetCells[0] || null;
+  const targetClassConflictCell = getAssignmentGroupBlockingCells(targetCells, cls, subCode, assignmentNote)[0] || null;
   let structuralError = '';
   if (ui.drag.isPalette) {
-    if (targetCell && isFrozenScheduleEntry(targetCell)) {
+    if (targetClassConflictCell && isFrozenScheduleEntry(targetClassConflictCell)) {
       structuralError = '凍結課程不可覆寫';
-    } else if (targetCell && isBindScheduleEntry(targetCell)) {
+    } else if (targetClassConflictCell && isBindScheduleEntry(targetClassConflictCell)) {
       structuralError = '綁班課程不可被單獨擠掉';
     } else {
       const bindClasses = getBindGroupClasses(ui.drag.subjectCode, cls);
@@ -5677,8 +5732,8 @@ function highlightDropZone(el, day, per, cls) {
       });
       if (bindPlan && !bindPlan.ok) structuralError = bindPlan.error || '綁班課程無法整組移動';
       if (!bindPlan) {
-        if (targetCell && isFrozenScheduleEntry(targetCell)) structuralError = '凍結課程不可互調';
-        else if (targetCell && isBindScheduleEntry(targetCell)) structuralError = '綁班課程不可被單獨擠掉';
+        if (targetClassConflictCell && isFrozenScheduleEntry(targetClassConflictCell)) structuralError = '凍結課程不可互調';
+        else if (targetClassConflictCell && isBindScheduleEntry(targetClassConflictCell)) structuralError = '綁班課程不可被單獨擠掉';
       }
     }
   }
@@ -5688,16 +5743,14 @@ function highlightDropZone(el, day, per, cls) {
     return;
   }
 
-  let tcCode = '', subCode = '', excludeCls = '';
+  let tcCode = '', excludeCls = '';
   if (ui.drag.isPalette) {
     tcCode  = ui.drag.teacherList?.length ? ui.drag.teacherList : ui.drag.teacherCode;
-    subCode = ui.drag.subjectCode;
     excludeCls = '';
   } else {
     const srcCell = ui.drag.cell;
     if (!srcCell) return;
     tcCode  = srcCell['教師姓名'];
-    subCode = srcCell['科目代碼'];
     excludeCls = ui.drag.cls;
   }
       const excludeInfo = ui.drag ? {
@@ -5728,6 +5781,9 @@ async function executeDrop(day, per, cls, weekType) {
       String(cell['科目代碼'] || '').trim() === String(dragInfo.subjectCode || '').trim() &&
       getScheduleAssignmentNote(cell) === dragAssignmentNote
     ) || targetSlotCells[0] || null;
+    const targetClassConflictCell = getAssignmentGroupBlockingCells(
+      targetSlotCells, cls, dragInfo.subjectCode, dragAssignmentNote
+    )[0] || null;
     const overlappingTargetCells = getOverlappingScheduleCellsAt(cls, day, per, per === 8 ? attr : '');
     const unexpectedOverlap = per === 8 && overlappingTargetCells.find(cell => {
       if (String(cell['課表ID'] || '').trim() === String(targetCell?.['課表ID'] || '').trim() && targetCell) return false;
@@ -5740,11 +5796,11 @@ async function executeDrop(day, per, cls, weekType) {
       toast('第八節已有整節或同週課程，不能再排入重疊課程', 'warning');
       return;
     }
-    if (targetCell && isFrozenScheduleEntry(targetCell)) {
+    if (targetClassConflictCell && isFrozenScheduleEntry(targetClassConflictCell)) {
       toast('凍結課程不可覆寫，請先解除固定設定', 'warning');
       return;
     }
-    if (targetCell && isBindScheduleEntry(targetCell)) {
+    if (targetClassConflictCell && isBindScheduleEntry(targetClassConflictCell)) {
       toast('綁班課程不可被單獨擠掉，請先整組移動綁班課程', 'warning');
       return;
     }
@@ -5828,22 +5884,19 @@ async function executeDrop(day, per, cls, weekType) {
 
   if (srcCls === cls && srcDay === day && srcPer === per) return;
 
-  const isOccupied = per === 8
-    ? !!(idx.schedByClassSlotP8[cls+'|'+day+'|8'] || {})[weekType]
-    : !!idx.schedByClassSlot[cls+'|'+day+'|'+per];
-
-  const occupiedCell = per === 8
-    ? (idx.schedByClassSlotP8[cls+'|'+day+'|8'] || {})[weekType]
-    : idx.schedByClassSlot[cls+'|'+day+'|'+per];
+  const sourceAssignmentNote = getScheduleAssignmentNote(srcCell);
+  const destinationClassCells = getScheduleCellsAt(cls, day, per, per === 8 ? weekType : '');
+  const occupiedCell = getAssignmentGroupBlockingCells(
+    destinationClassCells, cls, srcCell['科目代碼'], sourceAssignmentNote
+  )[0] || null;
+  const isOccupied = Boolean(occupiedCell);
   if (occupiedCell && isBindScheduleEntry(occupiedCell)) {
     toast('綁班課程不可被單獨擠掉，請先整組移動綁班課程', 'warning');
     return;
   }
 
   if (isOccupied) {
-    const dstCell = per === 8
-      ? (idx.schedByClassSlotP8[cls+'|'+day+'|8'] || {})[weekType]
-      : idx.schedByClassSlot[cls+'|'+day+'|'+per];
+    const dstCell = occupiedCell;
     if (dstCell && isFrozenScheduleEntry(dstCell)) {
       toast('凍結課程不可被對調，請先解除固定設定', 'warning');
       return;
@@ -5868,7 +5921,7 @@ async function executeDrop(day, per, cls, weekType) {
     const conflicts = detectConflicts(day, per, srcCell['教師姓名'], srcCell['科目代碼'], cls, srcCls, moveExcludeInfo, weekType);
     const canMove = await checkHandAdjustConflicts(conflicts, '調動');
     if (!canMove) return;
-    await doMove(srcCls, srcDay, srcPer, cls, day, per, srcWeek, weekType, Boolean(canMove.force));
+    await doMove(srcCls, srcDay, srcPer, cls, day, per, srcWeek, weekType, Boolean(canMove.force), sourceAssignmentNote);
   }
 }
 
@@ -5920,8 +5973,8 @@ document.getElementById('ctx-clear').onclick = async () => {
 // ============================================================
 // 課表操作（Write）
 // ============================================================
-async function doMove(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcWeek, dstWeek, force = false) {
-  optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcWeek, dstWeek, force);
+async function doMove(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcWeek, dstWeek, force = false, sourceAssignmentNote = '') {
+  optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcWeek, dstWeek, force, sourceAssignmentNote);
 }
 
 async function doSwap(a, b, force = false) {

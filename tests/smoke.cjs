@@ -723,7 +723,7 @@ check('Manual exclusive conflict can be force-placed', () => {
   if (!classBlock.includes('cellTeacherList.map')) throw new Error('班級課表未顯示主／協同教師');
 
    if (!app.includes('function optimisticUpdateCell({ classCode, day, period, subjectCode, teacherCode, teacherList, assignmentNote = \'\', attr = \'一般\', isLocked = false, isOvertime = false, force = false })')) throw new Error('single-cell force parameter missing');
-   if (!app.includes('function optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcWeek, dstWeek, force = false)')) throw new Error('move force parameter missing');
+   if (!app.includes('function optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcWeek, dstWeek, force = false, requestedSourceAssignmentNote = \'\')')) throw new Error('move force parameter missing');
    if (!app.includes('allowManualConstraintWarnings: force')) throw new Error('manual batch writes do not pass the general force flag');
    const updateStart = backend.indexOf('function updateCell_');
   const updateEnd = backend.indexOf('function clearCell_', updateStart);
@@ -805,7 +805,7 @@ check('Subject relation soft rule is wired end to end', () => {
   if (!backend.includes("'科目關係':")) throw new Error('subject relation sheet definition missing');
   if (!backend.includes("headers: ['規則ID', '科目A', '科目B', '適用年級', '適用班級', '備註']")) throw new Error('subject relation schema missing');
   if (!backend.includes("subjectRelations:   sheetToObjects_(ss.getSheetByName('科目關係'))")) throw new Error('getAll does not return subject relations');
-   if (!backend.includes("const GAS_VERSION = '20260905_v1213_schedule_notes';")) throw new Error('GAS version marker missing');
+   if (!backend.includes("const GAS_VERSION = '20260905_v1214_group_slot';")) throw new Error('GAS version marker missing');
   if (!backend.includes('function saveSubjectRelation_(ss, p)')) throw new Error('atomic subject relation save missing');
   if (!backend.includes("case 'saveSubjectRelation': result = saveSubjectRelation_(ss, payload); break;")) throw new Error('subject relation save route missing');
   for (const marker of [
@@ -863,7 +863,7 @@ check('Subject relation warning respects class scope', () => {
   if (context.getSubjectRelationWarnings(2, '國文', '701', schedule).length !== 1) throw new Error('綁班不應停用同班科目關係');
 });
 check('Frontend and backend versions use a handshake', () => {
-   if (!app.includes("const FRONTEND_VERSION = '20260905_v1213_schedule_notes';")) throw new Error('frontend version marker missing');
+  if (!app.includes("const FRONTEND_VERSION = '20260905_v1214_group_slot';")) throw new Error('frontend version marker missing');
   if (!app.includes('res.data.gasVersion')) throw new Error('frontend does not read GAS version');
   if (!app.includes('前後端版本不同')) throw new Error('version mismatch warning missing');
   if (!backend.includes('gasVersion:          GAS_VERSION')) throw new Error('GAS getAll version missing');

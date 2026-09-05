@@ -141,8 +141,9 @@ function buildContext(data) {
     applyData(__inputData);
     ui.selectedClass = '';
     ui.selectedTeacher = '';
-    showLoading = function () {};
-    toast = function () {};
+     showLoading = function () {};
+     renderClassSelect = function () {};
+     toast = function () {};
     renderClassTT = function () {};
     renderTeacherTT = function () {};
     loadAll = async function () {};
@@ -407,6 +408,57 @@ async function main() {
     const conflict = vm.runInContext('getAssignmentGroupConflict(state.assignments[0], state.assignments)', ambiguousContext);
     if (conflict) throw new Error('相同教師集合的不同備註仍被分組防呆阻擋');
     console.log('PASS  同班同科不同備註配課分組獨立排課');
+  }
+  // 情境 11：同班同格的不同教師分組可直接並存，移動其中一組時不可刪掉另一組。
+  {
+    const data = baseData();
+    data.assignments.push(
+      { '配課ID': 'A_GROUP_A', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T1', '每週節數': '3', '備註': 'A組' },
+      { '配課ID': 'A_GROUP_B', '班級代碼': '701', '科目代碼': '英語', '教師姓名': 'T2', '每週節數': '3', '備註': 'B組' }
+    );
+    data.schedule.push(
+      { '課表ID': 'S_GROUP_A', '班級代碼': '701', '星期': '3', '節次': '45', '科目代碼': '英語', '教師姓名': 'T1', '課堂屬性': '抽離', '備註': 'A組' },
+      { '課表ID': 'S_GROUP_A_SOURCE', '班級代碼': '701', '星期': '3', '節次': '1', '科目代碼': '英語', '教師姓名': 'T1', '課堂屬性': '一般', '備註': 'A組' },
+      { '課表ID': 'S_GROUP_B', '班級代碼': '701', '星期': '3', '節次': '1', '科目代碼': '英語', '教師姓名': 'T2', '課堂屬性': '一般', '備註': 'B組' }
+    );
+    const context = buildContext(data);
+    const differentGroupBlocking = vm.runInContext(
+      "getAssignmentGroupBlockingCells(getScheduleCellsAt('701', 3, 45), '701', '英語', 'B組')",
+      context
+    );
+    if (differentGroupBlocking.length !== 0) throw new Error('同班同格不同教師分組仍被判定為替換目標');
+    const sameGroupBlocking = vm.runInContext(
+      "getAssignmentGroupBlockingCells(getScheduleCellsAt('701', 3, 45), '701', '英語', 'A組')",
+      context
+    );
+    if (sameGroupBlocking.length !== 1) throw new Error('同一分組的既有課程未保留替換防護');
+    const legacyContext = buildContext(JSON.parse(JSON.stringify(data)));
+    vm.runInContext("state.schedule.find(row => row['課表ID'] === 'S_GROUP_A')['備註'] = ''; buildIndex()", legacyContext);
+    const legacyBlocking = vm.runInContext(
+      "getAssignmentGroupBlockingCells(getScheduleCellsAt('701', 3, 45), '701', '英語', 'B組')",
+      legacyContext
+    );
+    if (legacyBlocking.length !== 0) throw new Error('舊課表缺少備註時，無法依不同教師唯一回溯分組');
+    context.__lastModal = null;
+    const confirmed = await vm.runInContext(
+      "(async () => confirmTeacherTimetableOverwrite(null, getAssignmentGroupBlockingCells(getScheduleCellsAt('701', 3, 45), '701', '英語', 'B組'), 3, 45))()",
+      context
+    );
+    if (!confirmed || context.__lastModal) throw new Error('不同教師分組仍跳出教師課表替換視窗');
+    const paletteContext = buildContext(data);
+    vm.runInContext("optimisticUpdateCell({ classCode: '701', day: 3, period: 45, subjectCode: '英語', teacherCode: 'T2', assignmentNote: 'B組', attr: '抽離' })", paletteContext);
+    const placedRows = vm.runInContext("state.schedule.filter(row => String(row['班級代碼']) === '701' && String(row['星期']) === '3' && String(row['節次']) === '45')", paletteContext);
+    if (placedRows.length !== 2 || !placedRows.some(row => row['備註'] === 'A組') || !placedRows.some(row => row['備註'] === 'B組')) {
+      throw new Error('從教師待排卡片排入同班同格時未保留另一個分組');
+    }
+    vm.runInContext("optimisticMoveCell('701', 3, 1, '701', 3, 45, '', '', false, 'B組')", context);
+    const movedRows = vm.runInContext("state.schedule.filter(row => String(row['班級代碼']) === '701' && String(row['星期']) === '3' && String(row['節次']) === '45')", context);
+    if (movedRows.length !== 2 || !movedRows.some(row => row['備註'] === 'A組') || !movedRows.some(row => row['備註'] === 'B組')) {
+      throw new Error('移動不同教師分組時覆蓋了同班同格的既有分組');
+    }
+    const sourceRows = vm.runInContext("state.schedule.filter(row => String(row['班級代碼']) === '701' && String(row['星期']) === '3' && String(row['節次']) === '1')", context);
+    if (sourceRows.length !== 1 || sourceRows[0]['備註'] !== 'A組') throw new Error('移動其中一組時誤刪了來源格的另一個分組');
+    console.log('PASS  同班同格不同教師分組可並存與移動');
   }
 }
 

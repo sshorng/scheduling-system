@@ -6,6 +6,8 @@ const read = name => fs.readFileSync(path.join(root, name), 'utf8');
 const app = read('app.js');
 const runtime = read('app-runtime.js');
 const wordExport = read('word-export.js');
+const seasonal = read('seasonal-schedule.js');
+const seasonalExport = read('seasonal-export.js');
 const backend = read('Code.gs');
 const html = read('index.html');
 const styles = read('style.css');
@@ -61,6 +63,8 @@ check('JavaScript syntax', () => {
   new vm.Script(app, { filename: 'app.js' });
   new vm.Script(runtime, { filename: 'app-runtime.js' });
   new vm.Script(wordExport, { filename: 'word-export.js' });
+  new vm.Script(seasonal, { filename: 'seasonal-schedule.js' });
+  new vm.Script(seasonalExport, { filename: 'seasonal-export.js' });
   new Function(backend);
 });
 check('Nonregular timetable periods use soft row backgrounds', () => {
@@ -805,7 +809,7 @@ check('Subject relation soft rule is wired end to end', () => {
   if (!backend.includes("'科目關係':")) throw new Error('subject relation sheet definition missing');
   if (!backend.includes("headers: ['規則ID', '科目A', '科目B', '適用年級', '適用班級', '備註']")) throw new Error('subject relation schema missing');
   if (!backend.includes("subjectRelations:   sheetToObjects_(ss.getSheetByName('科目關係'))")) throw new Error('getAll does not return subject relations');
-  if (!backend.includes("const GAS_VERSION = '20260826_v1212_export_excludes_preplanned';")) throw new Error('GAS version marker missing');
+  if (!backend.includes("const GAS_VERSION = '20260927_seasonal_tutoring_v1';")) throw new Error('GAS version marker missing');
   if (!backend.includes('function saveSubjectRelation_(ss, p)')) throw new Error('atomic subject relation save missing');
   if (!backend.includes("case 'saveSubjectRelation': result = saveSubjectRelation_(ss, payload); break;")) throw new Error('subject relation save route missing');
   for (const marker of [
@@ -863,7 +867,7 @@ check('Subject relation warning respects class scope', () => {
   if (context.getSubjectRelationWarnings(2, '國文', '701', schedule).length !== 1) throw new Error('綁班不應停用同班科目關係');
 });
 check('Frontend and backend versions use a handshake', () => {
-  if (!app.includes("const FRONTEND_VERSION = '20260826_v1212_export_excludes_preplanned';")) throw new Error('frontend version marker missing');
+  if (!app.includes("const FRONTEND_VERSION = '20260927_seasonal_tutoring_v1';")) throw new Error('frontend version marker missing');
   if (!app.includes('res.data.gasVersion')) throw new Error('frontend does not read GAS version');
   if (!app.includes('前後端版本不同')) throw new Error('version mismatch warning missing');
   if (!backend.includes('gasVersion:          GAS_VERSION')) throw new Error('GAS getAll version missing');
@@ -2188,13 +2192,13 @@ check('Main tab DOM hierarchy', () => {
     if (id) parents[id] = stack[stack.length - 1] || '(root)';
     stack.push(id || 'div');
   }
-  for (const id of ['panel-timetable','panel-config','panel-constraints','panel-stats']) if (parents[id] !== 'main') throw new Error(`${id} parent is ${parents[id]}`);
+  for (const id of ['panel-timetable','panel-config','panel-constraints','panel-stats','panel-seasonal']) if (parents[id] !== 'main') throw new Error(`${id} parent is ${parents[id]}`);
   if (parents['subpanel-constraints-block'] !== 'panel-constraints') throw new Error('teacher constraint panel nesting');
   if (parents['subpanel-constraints-rule'] !== 'panel-constraints') throw new Error('subject constraint panel nesting');
   if (parents['subpanel-constraints-relation'] !== 'panel-constraints') throw new Error('subject relation panel nesting');
 });
 check('Versioned local assets', () => {
-  for (const asset of ['style.css','word-export.js','app.js','app-runtime.js']) {
+  for (const asset of ['style.css','word-export.js','seasonal-schedule.js','seasonal-export.js','app.js','app-runtime.js']) {
     const escaped = asset.replace('.', '\\.');
     if (!(new RegExp(`${escaped}\\?v=[^"']+`)).test(html)) throw new Error(`${asset} is not versioned`);
   }
@@ -3599,6 +3603,98 @@ check('Timetable ellipsis exposes full hover text', () => {
   if (!app.includes("title=\"'+esc(info.text||'')+'\"")) throw new Error('cell subject hover title missing');
   if (!app.includes("title=\"'+esc(info.meta)+'\"")) throw new Error('cell meta hover title missing');
   if (!app.includes("title=\"' + esc(sub) + '\"")) throw new Error('p8 subject hover title missing');
+});
+check('Seasonal schedule respects date windows, manual first period, and teacher blackout weeks', () => {
+  const context = { window: {} };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(seasonal, context, { filename: 'seasonal-schedule.js' });
+  const days = [];
+  for (const [start, end] of [['2026-07-20', '2026-07-24'], ['2026-07-27', '2026-07-31'], ['2026-08-03', '2026-08-07']]) {
+    for (let time = Date.parse(start + 'T00:00:00Z'); time <= Date.parse(end + 'T00:00:00Z'); time += 86400000) {
+      days.push({ '場次ID': 'S1', '日期': new Date(time).toISOString().slice(0, 10), '是否上課': 'TRUE' });
+    }
+  }
+  const session = { '場次ID': 'S1', '開始日期': '2026-07-20', '結束日期': '2026-08-07' };
+  const needs = [
+    { '需求ID': 'N1', '班級代碼': '901', '科目代碼': '生物', '教師姓名': 'BIO', '本期節數': '5', '起始週': '1', '結束週': '2' },
+    { '需求ID': 'N2', '班級代碼': '901', '科目代碼': '理化', '教師姓名': 'PHY', '本期節數': '5', '起始週': '3', '結束週': '3' }
+  ];
+  const manualFirst = { '課表ID': 'M1', '場次ID': 'S1', '班級代碼': '901', '日期': '2026-07-20', '節次': '1', '科目代碼': '學習輔導', '教師姓名': '', '手動安排': 'TRUE', '是否鎖定': 'FALSE' };
+  const result = context.seasonalBuildPlan({
+    session, days, needs,
+    teacherBlocks: [{ '教師姓名': 'BIO', '開始日期': '2026-07-20', '結束日期': '2026-07-26', '原因': '出國' }],
+    schedule: [manualFirst], seed: 7
+  });
+  if (result.error || result.added !== 10 || result.deficits.length) throw new Error('可排課程未依指定週別完整排入');
+  if (!result.schedule.some(row => row['課表ID'] === 'M1')) throw new Error('手動第一節被自動排課覆蓋');
+  if (result.schedule.some(row => Number(row['節次']) === 1 && row['課表ID'] !== 'M1')) throw new Error('自動排課錯排第一節');
+  if (result.schedule.some(row => row['教師姓名'] === 'BIO' && row['日期'] < '2026-07-27')) throw new Error('教師停排週仍有排入課程');
+  if (result.schedule.some(row => row['科目代碼'] === '理化' && row['日期'] < '2026-08-03')) throw new Error('課程排入指定授課週別之前');
+  const weeks = context.seasonalGetWeekRanges('2026-07-20', '2026-07-31', days);
+  if (weeks.length !== 2 || weeks[0].teachingDates.length !== 5 || weeks[1].teachingDates.length !== 5) throw new Error('日曆週切分錯誤');
+  const bioLesson = result.schedule.find(row => row['教師姓名'] === 'BIO' && Number(row['節次']) > 1);
+  const conflict = context.seasonalCheckManualPlacement({
+    classCode: '902', date: bioLesson['日期'], period: Number(bioLesson['節次']), subject: '數學', teacherCode: 'BIO',
+    schedule: result.schedule, teacherBlocks: []
+  });
+  if (conflict.ok || !conflict.error.includes('教師')) throw new Error('人工安排未阻擋教師同時段衝堂');
+});
+check('Seasonal GAS bundle validates five-period date schedules independently', () => {
+  const start = backend.indexOf('function seasonalIsoDate_');
+  const end = backend.indexOf('function saveSeasonalBundle_', start);
+  if (start < 0 || end < 0) throw new Error('寒暑輔後端驗證函式缺少');
+  const context = { Utilities: { formatDate: date => date.toISOString().slice(0, 10) } };
+  vm.createContext(context);
+  vm.runInContext(backend.slice(start, end), context, { filename: 'seasonal-backend-validation.js' });
+  const bundle = {
+    session: { '場次ID': 'S1', '活動名稱': '測試暑輔', '開始日期': '2026-07-20', '結束日期': '2026-07-24' },
+    days: [{ '日期': '2026-07-20', '是否上課': 'TRUE' }], teacherBlocks: [],
+    schedule: [
+      { '課表ID': 'M1', '班級代碼': '901', '日期': '2026-07-20', '節次': '1', '科目代碼': '學習輔導', '教師姓名': '', '手動安排': 'TRUE' },
+      { '課表ID': 'S1', '班級代碼': '901', '日期': '2026-07-20', '節次': '2', '科目代碼': '生物', '教師姓名': 'BIO', '手動安排': 'FALSE' }
+    ]
+  };
+  const validError = context.validateSeasonalBundle_(bundle);
+  if (validError) throw new Error('合法寒暑輔課表未通過後端驗證：' + validError);
+  const automaticFirst = { ...bundle, schedule: [{ ...bundle.schedule[0], '手動安排': 'FALSE' }] };
+  if (!context.validateSeasonalBundle_(automaticFirst).includes('第一節')) throw new Error('後端未保護手動第一節');
+  const clash = { ...bundle, schedule: [...bundle.schedule, { ...bundle.schedule[1], '課表ID': 'S2', '班級代碼': '902' }] };
+  if (!context.validateSeasonalBundle_(clash).includes('教師衝堂')) throw new Error('後端未阻擋教師衝堂');
+  if (!backend.includes("case 'saveSeasonalBundle': result = saveSeasonalBundle_(ss, payload); break;")) throw new Error('寒暑輔資料保存 API 未接入');
+  for (const sheet of ['寒暑輔場次', '寒暑輔上課日', '寒暑輔課程需求', '寒暑輔教師停排', '寒暑輔課表']) {
+    if (!backend.includes("'" + sheet + "':")) throw new Error('寒暑輔資料表缺少：' + sheet);
+  }
+});
+check('Seasonal Excel exports valid Open XML layout and both timetable views', () => {
+  const files = new Map();
+  class MockZip {
+    constructor(folder = '') { this.folderPath = folder; }
+    folder(name) { return new MockZip(this.folderPath + name + '/'); }
+    file(name, contents) { files.set(this.folderPath + name, String(contents)); return this; }
+    generate() { return { type: 'mock-xlsx' }; }
+  }
+  let savedFileName = '';
+  const context = { PizZip: MockZip, saveAs(_blob, name) { savedFileName = name; } };
+  context.window = context;
+  vm.createContext(context);
+  vm.runInContext(seasonalExport, context, { filename: 'seasonal-export.js' });
+  const xml = context.seasonalExcelWorksheetXml([
+    [{ v: '暑輔班級課表', s: 1 }, null],
+    [{ v: '日期', s: 2 }, { v: '第一節\n07:40－08:25', s: 2 }],
+    [{ v: '07/20(週一)', s: 3 }, { v: '學習輔導', s: 5 }]
+  ], { widths: [15, 12], merges: ['A1:B1'] });
+  if (!xml.includes('dimension ref="A1:B3"') || !xml.includes('<mergeCell ref="A1:B1"/>') || !xml.includes('學習輔導')) throw new Error('Excel 工作表 Open XML 結構不完整');
+  context.seasonalCreateXlsx([{ name: '901', rows: [[{ v: '班級課表', s: 1 }]], merges: ['A1:B1'], widths: [12, 12] }], '寒暑輔.xlsx');
+  if (savedFileName !== '寒暑輔.xlsx' || !files.has('xl/worksheets/sheet1.xml') || !files.has('xl/styles.xml') || !files.get('xl/workbook.xml').includes('name="901"')) {
+    throw new Error('未建立包含工作表與樣式的 xlsx Open XML 封裝');
+  }
+  for (const marker of ['function seasonalClassWorksheet', 'function seasonalTeacherWorksheet', '班級課表', '教師課表', '.xlsx']) {
+    if (!seasonalExport.includes(marker)) throw new Error('班級／教師 Excel 匯出功能缺少：' + marker);
+  }
+  for (const id of ['panel-seasonal', 'seasonal-days-list', 'seasonal-needs-body', 'seasonal-blocks-body', 'seasonal-timetable', 'seasonal-assign-modal', 'seasonal-assign-lock']) {
+    if (!html.includes('id="' + id + '"')) throw new Error('寒暑輔介面缺少：' + id);
+  }
 });
 for (const result of results) console.log(`${result.ok ? 'PASS' : 'FAIL'}  ${result.name}${result.error ? `: ${result.error}` : ''}`);
 if (results.some(result => !result.ok)) process.exitCode = 1;

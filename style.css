@@ -72,6 +72,94 @@
     #status-dot.error { background: var(--danger); }
     @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
 
+    /* ===== 寒暑輔日期型排課 ===== */
+    .seasonal-page { max-width: 1500px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+    .seasonal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .seasonal-toolbar h2 { font-size: 19px; margin: 2px 0 4px; }
+    .seasonal-toolbar p, .seasonal-timetable-toolbar p { color: var(--ink-2); font-size: 12px; }
+    .seasonal-kicker { color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+    .seasonal-toolbar-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+    .seasonal-toolbar-actions label { font-size: 12px; font-weight: 700; }
+    .seasonal-toolbar-actions select { min-width: 190px; }
+    .seasonal-empty { min-height: 220px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; text-align: center; }
+    .seasonal-empty strong { font-size: 17px; }
+    .seasonal-empty span { color: var(--ink-2); font-size: 13px; }
+    .seasonal-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .seasonal-section-heading > div { display: flex; align-items: center; gap: 9px; }
+    .seasonal-step { display: inline-flex; width: 25px; height: 25px; align-items: center; justify-content: center; border-radius: 50%; background: var(--accent-light); color: var(--accent); font-size: 12px; font-weight: 800; }
+    .seasonal-save-status { color: var(--success); font-size: 11px; }
+    .seasonal-save-status.is-error { color: var(--danger); }
+    .seasonal-session-fields { display: grid; grid-template-columns: minmax(230px, 2fr) repeat(4, minmax(130px, 1fr)) auto; align-items: end; gap: 10px; }
+    .seasonal-session-fields .form-group, .seasonal-form-grid .form-group { min-width: 0; margin-bottom: 0; }
+    .seasonal-generate-days { white-space: nowrap; height: 34px; }
+    .seasonal-period-times { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+    .seasonal-period-times span { padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-2); color: var(--ink-2); font-size: 11px; }
+    .seasonal-period-times b { color: var(--ink); }
+    .seasonal-days-heading { display: flex; align-items: baseline; gap: 10px; margin: 16px 0 8px; font-size: 12px; }
+    .seasonal-days-heading .text-muted { font-size: 11px; }
+    .seasonal-days-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .seasonal-day-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: #f1f5f9; color: var(--muted); cursor: pointer; font-size: 11px; }
+    .seasonal-day-chip.is-active { border-color: #bfdbfe; background: #eff6ff; color: var(--ink); }
+    .seasonal-day-chip input { width: 13px; height: 13px; margin: 0; accent-color: var(--accent); }
+    .seasonal-day-chip small { color: var(--muted); font-size: 10px; }
+    .seasonal-config-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(340px, .9fr); align-items: start; gap: 14px; }
+    .seasonal-form-grid { display: grid; grid-template-columns: repeat(3, minmax(110px, 1fr)); gap: 9px; }
+    .seasonal-form-grid input, .seasonal-form-grid select { width: 100%; }
+    .seasonal-block-form { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+    .seasonal-table-scroll { max-height: 280px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+    .seasonal-table-scroll .data-table { margin: 0; }
+    .seasonal-table-scroll .data-table th { position: sticky; top: 0; z-index: 1; background: var(--surface-2); }
+    .seasonal-timetable-card { min-width: 0; }
+    .seasonal-timetable-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+    .seasonal-timetable-toolbar .seasonal-section-heading { margin: 0 0 3px; }
+    .seasonal-view-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+    .seasonal-view-controls label { font-size: 12px; font-weight: 700; }
+    .seasonal-view-controls select { min-width: 130px; }
+    .seasonal-schedule-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .seasonal-schedule-summary span { padding: 5px 9px; border-radius: 5px; background: var(--surface-2); color: var(--ink-2); font-size: 11px; }
+    .seasonal-schedule-summary b { color: var(--ink); }
+    .seasonal-timetable-scroll { overflow: auto; max-height: 70vh; border: 1px solid var(--border); border-radius: 7px; }
+    .seasonal-timetable-table { width: 100%; min-width: 860px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+    .seasonal-timetable-table th, .seasonal-timetable-table td { padding: 5px; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); text-align: center; }
+    .seasonal-timetable-table th { position: sticky; top: 0; z-index: 2; background: #eff6ff; color: var(--ink); font-size: 12px; }
+    .seasonal-timetable-table th:first-child { left: 0; z-index: 3; width: 125px; }
+    .seasonal-timetable-table th small { display: block; color: var(--ink-2); font-size: 10px; font-weight: 500; }
+    .seasonal-timetable-table td:first-child { position: sticky; left: 0; z-index: 1; background: #fff; }
+    .seasonal-timetable-table tbody tr:hover td { background-color: #f8fbff; }
+    .seasonal-date-cell b { display: block; font-size: 12px; }
+    .seasonal-date-cell small { display: block; color: var(--muted); font-size: 10px; }
+    .seasonal-timetable-table td.is-manual-period { background: #f1f5f9; }
+    .seasonal-slot-button { width: 100%; min-height: 46px; padding: 5px; border: 1px dashed transparent; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; font: inherit; font-size: 13px; }
+    .seasonal-slot-button[draggable="true"] { cursor: grab; }
+    .seasonal-slot-button[draggable="true"]:active { cursor: grabbing; }
+    .seasonal-slot-button:hover { border-color: #93c5fd; background: #eff6ff; }
+    .seasonal-slot-button.is-manual-period { background: #e2e8f0; }
+    .seasonal-slot-button.has-course { border-style: solid; border-color: var(--border); background: #f8fafc; font-weight: 700; }
+    .seasonal-slot-button.is-manual-period.has-course { background: #e2e8f0; }
+    .seasonal-slot-button small, .seasonal-teacher-class small { display: block; color: var(--ink-2); font-size: 10px; font-weight: 500; }
+    .seasonal-add-mark { color: #94a3b8; font-size: 18px; }
+    .seasonal-teacher-class { display: block; margin: 2px; padding: 4px; border-radius: 4px; background: #dbeafe; color: #1e3a8a; font-size: 12px; font-weight: 700; }
+    .seasonal-empty-inline { padding: 30px; color: var(--muted); text-align: center; font-size: 13px; }
+    .seasonal-assign-modal-card { max-width: 460px; }
+    .seasonal-assign-modal-card .form-group { margin: 12px 0; }
+    .seasonal-assign-modal-card input { width: 100%; }
+    .seasonal-assign-hint { padding: 8px 10px; border-radius: 5px; background: var(--surface-2); color: var(--ink-2); font-size: 12px; }
+    .seasonal-lock-toggle { display: flex; align-items: center; gap: 7px; margin-top: 8px; color: var(--ink-2); font-size: 12px; cursor: pointer; }
+    .seasonal-lock-toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+    .seasonal-assign-modal-card .modal-actions { justify-content: space-between; }
+    @media (max-width: 1050px) {
+      .seasonal-session-fields { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+      .seasonal-config-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      .seasonal-toolbar, .seasonal-timetable-toolbar { align-items: stretch; flex-direction: column; }
+      .seasonal-toolbar-actions { align-items: stretch; }
+      .seasonal-toolbar-actions select { flex: 1 1 100%; }
+      .seasonal-session-fields, .seasonal-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .seasonal-generate-days { grid-column: 1 / -1; }
+      .seasonal-timetable-scroll { max-height: 62vh; }
+    }
+
     /* ===== Main ===== */
      #main { flex: 1; padding: 16px; overflow-x: auto; }
      .tab-panel { display: none; }

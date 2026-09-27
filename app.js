@@ -1016,7 +1016,7 @@ function compressSlots(slots) {
 // GAS URL（契約 §3.C 三層優先序）
 // ============================================================
 const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycby8i5bnQ-oKZMO1HUQO6pJF6f_XQL8bQHO2Yj3nJ2D7NCzNZbe_bhks8hxTVZWWSxz7/exec";  // 已鎖定部署網址
-const FRONTEND_VERSION = '20260826_v1212_export_excludes_preplanned';
+const FRONTEND_VERSION = '20260927_seasonal_tutoring_v1';
 
 function resolveGasUrl() {
   if (DEFAULT_GAS_URL && DEFAULT_GAS_URL.trim()) return DEFAULT_GAS_URL.trim();
@@ -1192,7 +1192,8 @@ let state = {
       { '班級代碼':'906','年級':'9','班級名稱':'九年六班','導師代碼':'','是否虛擬班':'FALSE' },
       { '班級代碼':'907','年級':'9','班級名稱':'九年七班(音樂班)','導師代碼':'','是否虛擬班':'FALSE' }
     ],     teachers: [], subjects:[],
-            assignments: [], schedule:[], scheduleRevision:'', teacherBlocks:[], subjectRules:[], subjectRelations:[], blockGroups:[], rooms:[], scheduleColors:[], teacherExclusives:[], apiVersion:'', schemaVersion:'',
+            assignments: [], schedule:[], scheduleRevision:'', teacherBlocks:[], subjectRules:[], subjectRelations:[], blockGroups:[], rooms:[], scheduleColors:[], teacherExclusives:[],
+            seasonalSessions:[], seasonalDays:[], seasonalNeeds:[], seasonalTeacherBlocks:[], seasonalSchedule:[], apiVersion:'', schemaVersion:'',
   settings:{}
 };
 let idx = {
@@ -1575,7 +1576,7 @@ const SCHEDULE_WRITE_ACTIONS = new Set([
 const MUTATING_GAS_ACTIONS = new Set([
   ...SCHEDULE_WRITE_ACTIONS,
   'saveMeta', 'renameTeacher', 'deleteMeta', 'saveTeacherBlock',
-  'saveSubjectRule', 'saveSubjectRelation', 'saveTeacherExclusive', 'initDatabase'
+  'saveSubjectRule', 'saveSubjectRelation', 'saveTeacherExclusive', 'initDatabase', 'saveSeasonalBundle'
 ]);
 let _pendingScheduleWrites = 0;
 let _gasRequestTail = Promise.resolve();
@@ -1879,6 +1880,11 @@ function applyData(d) {
   state.rooms         = d.rooms         || [];
   state.scheduleColors= d.scheduleColors|| [];
   state.teacherExclusives = d.teacherExclusives || [];
+  state.seasonalSessions = d.seasonalSessions || [];
+  state.seasonalDays = d.seasonalDays || [];
+  state.seasonalNeeds = d.seasonalNeeds || [];
+  state.seasonalTeacherBlocks = d.seasonalTeacherBlocks || [];
+  state.seasonalSchedule = d.seasonalSchedule || [];
   state.apiVersion = String(d.gasVersion || '');
   state.schemaVersion = String(d.schemaVersion || '');
   state.settings      = d.settings      || {};
@@ -7114,6 +7120,12 @@ function activateMainTab(tab) {
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.toggle('active', btn === target));
   document.querySelectorAll('.tab-panel').forEach(item => item.classList.toggle('active', item === panel));
   ui.activeTab = tab;
+  const regularActions = [
+    document.getElementById('__autoScheduleBtn'),
+    document.getElementById('__wordExportBtn'),
+    document.getElementById('__clearScheduleBtn')
+  ];
+  regularActions.forEach(button => { if (button) button.style.display = tab === 'seasonal' ? 'none' : ''; });
   if (typeof window.renderTabIfNeeded === 'function') {
     window.renderTabIfNeeded(tab);
   } else {
@@ -7393,6 +7405,7 @@ function getDemoData() {
     blockGroups: [
       { '群組ID':'BG01', '群組名稱':'七年級聯課', '科目清單':'體育,班週會', '班級清單':'701,702,703' },
     ],
+    seasonalSessions: [], seasonalDays: [], seasonalNeeds: [], seasonalTeacherBlocks: [], seasonalSchedule: [],
     settings: { '學校名稱':'建成國中', '學期代號':'114-1', '每日節數':'8' }
   };
 }
@@ -7403,6 +7416,7 @@ function getDemoData() {
 window.addEventListener('DOMContentLoaded', async () => {
   restoreUIState();
   initTabs();
+  if (typeof initSeasonalModule === 'function') initSeasonalModule();
   activateMainTab(ui.activeTab);
   attachAllTeacherComboboxes();
 

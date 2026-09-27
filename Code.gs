@@ -11,15 +11,15 @@
 
 // ===================== 工作表定義 =====================
 
-const GAS_VERSION = '20260826_v1212_export_excludes_preplanned';
-const SCHEMA_VERSION = '20260826_bilingual_course_v5';
+const GAS_VERSION = '20260927_seasonal_tutoring_v1';
+const SCHEMA_VERSION = '20260927_seasonal_tutoring_v1';
 
 // 所有會改動試算表的動作共用同一把 ScriptLock，避免多視窗或快速連點互相覆寫。
 const LOCKED_WRITE_ACTIONS = new Set([
   'ensureSchema', 'updateCell', 'clearCell', 'swapCells', 'lockCell', 'setOvertime', 'batchSetOvertime',
   'saveMeta', 'renameTeacher', 'deleteMeta', 'saveTeacherBlock', 'saveSubjectRule',
   'saveSubjectRelation', 'saveTeacherExclusive', 'savePatrolSchedule',
-  'initDatabase', 'batchUpdateSchedule'
+  'initDatabase', 'batchUpdateSchedule', 'saveSeasonalBundle'
 ]);
 
 const SHEET_DEFS = {
@@ -74,6 +74,26 @@ const SHEET_DEFS = {
   '互斥': {
     headers: ['規則ID', '教師A', '教師B', '備註'],
     key: '規則ID'
+  },
+  '寒暑輔場次': {
+    headers: ['場次ID', '活動名稱', '活動類型', '學年度', '開始日期', '結束日期', '節次時間', '版本號'],
+    key: '場次ID'
+  },
+  '寒暑輔上課日': {
+    headers: ['記錄ID', '場次ID', '日期', '是否上課', '備註'],
+    key: '記錄ID'
+  },
+  '寒暑輔課程需求': {
+    headers: ['需求ID', '場次ID', '班級代碼', '科目代碼', '教師姓名', '本期節數', '起始週', '結束週'],
+    key: '需求ID'
+  },
+  '寒暑輔教師停排': {
+    headers: ['記錄ID', '場次ID', '教師姓名', '開始日期', '結束日期', '原因'],
+    key: '記錄ID'
+  },
+  '寒暑輔課表': {
+    headers: ['課表ID', '場次ID', '班級代碼', '日期', '節次', '科目代碼', '教師姓名', '是否鎖定', '手動安排', '需求ID'],
+    key: '課表ID'
   }
 };
 
@@ -162,6 +182,7 @@ function doPost(e) {
       case 'initDatabase':      result = initDefaultData_(ss, payload.overwrite); break;
       case 'validateScheduleSnapshot': result = validateScheduleSnapshotAction_(ss, payload); break;
       case 'batchUpdateSchedule': result = batchUpdateSchedule_(ss, payload); break;
+      case 'saveSeasonalBundle': result = saveSeasonalBundle_(ss, payload); break;
       case 'verifyAdmin':       result = verifyAdmin_(payload.password || ''); break;
       default:
         return jsonOut_({ ok: false, error: '未知動作：' + action });
@@ -595,8 +616,175 @@ function getAll_(ss) {
     rooms:              sheetToObjects_(ss.getSheetByName('教室')),
     scheduleColors:     sheetToObjects_(ss.getSheetByName('配色')),
     teacherExclusives:  sheetToObjects_(ss.getSheetByName('互斥')),
+    seasonalSessions:   sheetToObjects_(ss.getSheetByName('寒暑輔場次')),
+    seasonalDays:       sheetToObjects_(ss.getSheetByName('寒暑輔上課日')),
+    seasonalNeeds:      sheetToObjects_(ss.getSheetByName('寒暑輔課程需求')),
+    seasonalTeacherBlocks: sheetToObjects_(ss.getSheetByName('寒暑輔教師停排')),
+    seasonalSchedule:   sheetToObjects_(ss.getSheetByName('寒暑輔課表')),
     settings:           getSettingsMap_(ss)
   };
+}
+
+function seasonalRowsForSession_(ss, sheetName, sessionId) {
+  return sheetToObjects_(ss.getSheetByName(sheetName)).filter(row =>
+    String(row['場次ID'] || '').trim() === String(sessionId || '').trim()
+  );
+}
+
+function seasonalBundleFromSheets_(ss, sessionId) {
+  const id = String(sessionId || '').trim();
+  return {
+    session: sheetToObjects_(ss.getSheetByName('寒暑輔場次')).find(row => String(row['場次ID'] || '').trim() === id) || null,
+    days: seasonalRowsForSession_(ss, '寒暑輔上課日', id),
+    needs: seasonalRowsForSession_(ss, '寒暑輔課程需求', id),
+    teacherBlocks: seasonalRowsForSession_(ss, '寒暑輔教師停排', id),
+    schedule: seasonalRowsForSession_(ss, '寒暑輔課表', id)
+  };
+}
+
+function replaceSeasonalSessionRows_(ss, sheetName, sessionId, newRows) {
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) throw new Error('找不到工作表：' + sheetName);
+  const headers = SHEET_DEFS[sheetName].headers;
+  const sessionColumn = headers.indexOf('場次ID');
+  const values = sheet.getDataRange().getValues();
+  const kept = values.length > 1 ? values.slice(1).filter(row =>
+    String(row[sessionColumn] == null ? '' : row[sessionColumn]).trim() !== String(sessionId || '').trim()
+  ) : [];
+  const normalized = (newRows || []).map(row => headers.map(header => {
+    const value = row && row[header] != null ? row[header] : '';
+    return value instanceof Date ? Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(value);
+  }));
+  const output = [headers, ...kept, ...normalized];
+  sheet.clearContents();
+  sheet.getRange(1, 1, output.length, headers.length).setNumberFormat('@');
+  sheet.getRange(1, 1, output.length, headers.length).setValues(output);
+  sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#EBF5FB');
+  sheet.setFrozenRows(1);
+}
+
+function seasonalIsoDate_(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return '';
+  const date = new Date(raw + 'T00:00:00Z');
+  return !Number.isNaN(date.getTime()) && Utilities.formatDate(date, 'GMT', 'yyyy-MM-dd') === raw ? raw : '';
+}
+
+function validateSeasonalBundle_(bundle) {
+  const session = bundle.session || {};
+  const sessionId = String(session['場次ID'] || '').trim();
+  const startDate = seasonalIsoDate_(session['開始日期']);
+  const endDate = seasonalIsoDate_(session['結束日期']);
+  if (!sessionId) return '場次代碼不可空白';
+  if (!session['活動名稱'] || !String(session['活動名稱']).trim()) return '請填寫活動名稱';
+  if (!startDate || !endDate || startDate > endDate) return '活動起訖日期無效';
+
+  const teachingDays = new Set((bundle.days || [])
+    .filter(row => String(row['是否上課'] || '').toUpperCase() === 'TRUE')
+    .map(row => seasonalIsoDate_(row['日期']))
+    .filter(Boolean));
+  const allDayDates = new Set();
+  for (const row of bundle.days || []) {
+    const date = seasonalIsoDate_(row['日期']);
+    if (!date || date < startDate || date > endDate) return '上課日清單含活動期間外或無效日期';
+    if (allDayDates.has(date)) return '上課日清單有重複日期：' + date;
+    allDayDates.add(date);
+  }
+  const calendarWeekStart = date => {
+    const value = new Date(date + 'T00:00:00Z');
+    const weekday = value.getUTCDay();
+    value.setUTCDate(value.getUTCDate() - (weekday === 0 ? 6 : weekday - 1));
+    return value.toISOString().slice(0, 10);
+  };
+  const totalWeeks = Math.floor((Date.parse(calendarWeekStart(endDate) + 'T00:00:00Z') - Date.parse(calendarWeekStart(startDate) + 'T00:00:00Z')) / 604800000) + 1;
+  const weekNumber = date => Math.floor((Date.parse(calendarWeekStart(date) + 'T00:00:00Z') - Date.parse(calendarWeekStart(startDate) + 'T00:00:00Z')) / 604800000) + 1;
+  const needsById = new Map();
+  for (const need of bundle.needs || []) {
+    const needId = String(need['需求ID'] || '').trim();
+    const count = parseInt(need['本期節數'], 10);
+    const firstWeek = parseInt(need['起始週'], 10);
+    const lastWeek = parseInt(need['結束週'], 10);
+    if (!needId || needsById.has(needId)) return '課程需求 ID 不可空白或重複';
+    if (!String(need['班級代碼'] || '').trim() || !String(need['科目代碼'] || '').trim() || !String(need['教師姓名'] || '').trim()) return '課程需求缺少班級、科目或教師';
+    if (!Number.isInteger(count) || count < 1 || !Number.isInteger(firstWeek) || !Number.isInteger(lastWeek) || firstWeek < 1 || lastWeek < firstWeek || lastWeek > totalWeeks) return '課程需求節數或授課週別無效';
+    needsById.set(needId, need);
+  }
+  const teacherBlocks = bundle.teacherBlocks || [];
+  for (const block of teacherBlocks) {
+    const first = seasonalIsoDate_(block['開始日期']);
+    const last = seasonalIsoDate_(block['結束日期']);
+    if (!String(block['教師姓名'] || '').trim() || !first || !last || first < startDate || last > endDate || first > last) return '教師停排資料缺少教師或有效日期';
+  }
+  const classSlots = new Set();
+  const teacherSlots = new Set();
+  const scheduleIds = new Set();
+  for (const row of bundle.schedule || []) {
+    const date = seasonalIsoDate_(row['日期']);
+    const period = parseInt(row['節次'], 10);
+    const classCode = String(row['班級代碼'] || '').trim();
+    const teacherCode = String(row['教師姓名'] || '').trim();
+    const subjectCode = String(row['科目代碼'] || '').trim();
+    const scheduleId = String(row['課表ID'] || '').trim();
+    const needId = String(row['需求ID'] || '').trim();
+    if (!date || date < startDate || date > endDate || !teachingDays.has(date)) return '課表含非上課日或活動期間外的日期：' + String(row['日期'] || '');
+    if (!classCode || !subjectCode || !Number.isInteger(period) || period < 1 || period > 5) return '課表資料缺少班級、科目或有效節次';
+    if (!scheduleId || scheduleIds.has(scheduleId)) return '課表 ID 不可空白或重複';
+    scheduleIds.add(scheduleId);
+    if (needId && period !== 1) {
+      const need = needsById.get(needId);
+      if (!need || String(need['班級代碼'] || '').trim() !== classCode || String(need['科目代碼'] || '').trim() !== subjectCode || String(need['教師姓名'] || '').trim() !== teacherCode) return '課表課程與課程需求不相符：' + scheduleId;
+      const week = weekNumber(date);
+      if (week < parseInt(need['起始週'], 10) || week > parseInt(need['結束週'], 10)) return '課表超出課程需求的授課週別：' + classCode + ' ' + date;
+    }
+    const classKey = classCode + '|' + date + '|' + period;
+    if (classSlots.has(classKey)) return '班級衝堂：' + classCode + ' ' + date + ' 第' + period + '節';
+    classSlots.add(classKey);
+    if (teacherCode) {
+      const teacherKey = teacherCode + '|' + date + '|' + period;
+      if (teacherSlots.has(teacherKey)) return '教師衝堂：' + teacherCode + ' ' + date + ' 第' + period + '節';
+      teacherSlots.add(teacherKey);
+      const blocked = teacherBlocks.find(block =>
+        String(block['教師姓名'] || '').trim() === teacherCode &&
+        seasonalIsoDate_(block['開始日期']) <= date && seasonalIsoDate_(block['結束日期']) >= date
+      );
+      if (blocked) return '教師停排期間不可安排：' + teacherCode + ' ' + date;
+    }
+    if (period === 1 && String(row['手動安排'] || '').toUpperCase() !== 'TRUE') return '第一節僅能手動安排';
+  }
+  return '';
+}
+
+function saveSeasonalBundle_(ss, payload) {
+  const bundle = payload && payload.bundle ? payload.bundle : {};
+  const session = Object.assign({}, bundle.session || {});
+  const sessionId = String(session['場次ID'] || '').trim();
+  if (!sessionId) return { ok: false, error: '場次代碼不可空白' };
+
+  const current = seasonalBundleFromSheets_(ss, sessionId);
+  const currentVersion = current.session ? String(current.session['版本號'] || '0') : '0';
+  const baseVersion = String(payload.baseVersion == null ? '0' : payload.baseVersion);
+  if (baseVersion !== currentVersion) {
+    return { ok: false, conflict: true, error: '寒暑輔場次已在另一個視窗更新，請重新載入後再儲存', currentVersion };
+  }
+
+  const nextVersion = String((parseInt(currentVersion, 10) || 0) + 1);
+  session['版本號'] = nextVersion;
+  const normalizedBundle = {
+    session,
+    days: (bundle.days || []).map(row => Object.assign({}, row, { '場次ID': sessionId })),
+    needs: (bundle.needs || []).map(row => Object.assign({}, row, { '場次ID': sessionId })),
+    teacherBlocks: (bundle.teacherBlocks || []).map(row => Object.assign({}, row, { '場次ID': sessionId })),
+    schedule: (bundle.schedule || []).map(row => Object.assign({}, row, { '場次ID': sessionId }))
+  };
+  const validationError = validateSeasonalBundle_(normalizedBundle);
+  if (validationError) return { ok: false, error: validationError };
+
+  replaceSeasonalSessionRows_(ss, '寒暑輔場次', sessionId, [session]);
+  replaceSeasonalSessionRows_(ss, '寒暑輔上課日', sessionId, normalizedBundle.days);
+  replaceSeasonalSessionRows_(ss, '寒暑輔課程需求', sessionId, normalizedBundle.needs);
+  replaceSeasonalSessionRows_(ss, '寒暑輔教師停排', sessionId, normalizedBundle.teacherBlocks);
+  replaceSeasonalSessionRows_(ss, '寒暑輔課表', sessionId, normalizedBundle.schedule);
+  return { ok: true, version: nextVersion, session };
 }
 
 // ===================== 互斥 CRUD =====================

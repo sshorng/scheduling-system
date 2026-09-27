@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260826_v1212_export_excludes_preplanned">
+  <link rel="stylesheet" href="style.css?v=20260927_seasonal_tutoring_v1">
 </head>
 <body>
 
@@ -23,15 +23,16 @@
     <button class="tab-btn active" data-tab="timetable">🗓 課表</button>
     <button class="tab-btn" data-tab="config">📋 配課</button>
      <button class="tab-btn" data-tab="constraints">⛔ 限制</button>
-     <button class="tab-btn" data-tab="stats">📊 統計</button>
+      <button class="tab-btn" data-tab="stats">📊 統計</button>
+      <button class="tab-btn" data-tab="seasonal">🌞 寒暑輔</button>
       <button class="tab-btn" data-tab="room">🏫 教室</button>
   </div>
   <div id="topbar-right">
     <div id="status-dot" title="連線狀態"></div>
     <div class="icon-btn" id="__sheetLink" title="開啟試算表" style="display:none;">📊</div>
     <button class="btn btn-success btn-sm" id="__autoScheduleBtn" onclick="openAutoScheduleModal()" style="font-weight:bold;margin-right:4px;">🤖 自動排課</button>
-    <button class="btn btn-primary btn-sm" onclick="openWordExportModal()" style="font-weight:bold;margin-right:4px;background:#7c3aed;">📄 匯出 Word</button>
-    <button class="btn btn-danger btn-sm" onclick="clearUnlockedSchedule()" style="font-weight:bold;margin-right:4px;">🗑 清除排課</button>
+    <button class="btn btn-primary btn-sm" id="__wordExportBtn" onclick="openWordExportModal()" style="font-weight:bold;margin-right:4px;background:#7c3aed;">📄 匯出 Word</button>
+    <button class="btn btn-danger btn-sm" id="__clearScheduleBtn" onclick="clearUnlockedSchedule()" style="font-weight:bold;margin-right:4px;">🗑 清除排課</button>
     <div class="icon-btn" id="__settingsBtn" title="連線設定">⚙️</div>
   </div>
 </div>
@@ -806,7 +807,120 @@
     </div>
   </div>
 
+  <!-- ── 寒暑輔日期型排課 ── -->
+  <div class="tab-panel" id="panel-seasonal">
+    <div class="seasonal-page">
+      <section class="panel-card seasonal-toolbar">
+        <div>
+          <div class="seasonal-kicker">DATE-BASED SCHEDULING</div>
+          <h2>寒暑輔排課工作台</h2>
+          <p>每場活動獨立管理日期、課程總節數與教師停排期間。第一節由你手動安排，自動排課使用第 2 至第 5 節。</p>
+        </div>
+        <div class="seasonal-toolbar-actions">
+          <label for="seasonal-session-select">活動場次</label>
+          <select id="seasonal-session-select" aria-label="選擇寒暑輔場次"></select>
+          <button class="btn btn-primary btn-sm" type="button" onclick="createSeasonalSession()">＋ 新增場次</button>
+          <button class="btn btn-ghost btn-sm" type="button" onclick="exportSeasonalWorkbook('class')">📥 班級版 Excel</button>
+          <button class="btn btn-ghost btn-sm" type="button" onclick="exportSeasonalWorkbook('teacher')">📥 教師版 Excel</button>
+        </div>
+      </section>
+
+      <div id="seasonal-empty" class="panel-card seasonal-empty" hidden>
+        <strong>尚未建立寒暑輔場次</strong>
+        <span>新增場次後，設定實際上課日、課程節數及教師停排期間。</span>
+        <button class="btn btn-primary" type="button" onclick="createSeasonalSession()">建立第一個場次</button>
+      </div>
+
+      <div id="seasonal-workspace" hidden>
+        <section class="panel-card">
+          <div class="seasonal-section-heading">
+            <div><span class="seasonal-step">1</span><strong>活動日期與節次</strong></div>
+            <span id="seasonal-session-status" class="seasonal-save-status">尚未儲存</span>
+          </div>
+          <div class="seasonal-session-fields">
+            <div class="form-group"><label for="seasonal-name">活動名稱</label><input id="seasonal-name" type="text" placeholder="例：115 學年度暑假學藝活動"></div>
+            <div class="form-group"><label for="seasonal-type">活動類型</label><select id="seasonal-type"><option value="暑輔">暑輔</option><option value="寒輔">寒輔</option></select></div>
+            <div class="form-group"><label for="seasonal-year">學年度</label><input id="seasonal-year" type="number" min="100" max="200" value="115"></div>
+            <div class="form-group"><label for="seasonal-start">開始日期</label><input id="seasonal-start" type="date"></div>
+            <div class="form-group"><label for="seasonal-end">結束日期</label><input id="seasonal-end" type="date"></div>
+            <button class="btn btn-primary btn-sm seasonal-generate-days" type="button" onclick="generateSeasonalTeachingDays()">依日期產生平日</button>
+          </div>
+          <div class="seasonal-period-times" id="seasonal-period-times"></div>
+          <div class="seasonal-days-heading">
+            <strong>實際上課日</strong><span class="text-muted">取消勾選即可排除假日或停課日；週別依日曆週編號。</span>
+          </div>
+          <div id="seasonal-days-list" class="seasonal-days-list"></div>
+          <div class="flex justify-end gap-2" style="margin-top:12px;">
+            <button class="btn btn-primary" type="button" onclick="saveSeasonalSetup()">儲存活動設定</button>
+          </div>
+        </section>
+
+        <div class="seasonal-config-grid">
+          <section class="panel-card">
+            <div class="seasonal-section-heading"><div><span class="seasonal-step">2</span><strong>班級課程需求</strong></div></div>
+            <div class="seasonal-form-grid">
+              <div class="form-group"><label for="seasonal-need-class">班級</label><select id="seasonal-need-class"></select></div>
+              <div class="form-group"><label for="seasonal-need-subject">科目</label><input id="seasonal-need-subject" type="text" list="seasonal-subject-options" placeholder="例：生物"><datalist id="seasonal-subject-options"></datalist></div>
+              <div class="form-group"><label for="seasonal-need-teacher">教師</label><input id="seasonal-need-teacher" type="text" list="seasonal-teacher-options" placeholder="選擇或輸入教師"><datalist id="seasonal-teacher-options"></datalist></div>
+              <div class="form-group"><label for="seasonal-need-count">本期節數</label><input id="seasonal-need-count" type="number" min="1" step="1" value="1"></div>
+              <div class="form-group"><label for="seasonal-need-week-start">起始週</label><select id="seasonal-need-week-start"></select></div>
+              <div class="form-group"><label for="seasonal-need-week-end">結束週</label><select id="seasonal-need-week-end"></select></div>
+            </div>
+            <div class="flex justify-end" style="margin:8px 0 12px;"><button class="btn btn-primary btn-sm" type="button" onclick="addSeasonalNeed()">＋ 新增需求</button></div>
+            <div class="seasonal-table-scroll"><table class="data-table compact-table"><thead><tr><th>班級</th><th>科目</th><th>教師</th><th>節數</th><th>授課週別</th><th></th></tr></thead><tbody id="seasonal-needs-body"></tbody></table></div>
+          </section>
+
+          <section class="panel-card">
+            <div class="seasonal-section-heading"><div><span class="seasonal-step">3</span><strong>教師停排期間</strong></div></div>
+            <div class="seasonal-form-grid seasonal-block-form">
+              <div class="form-group"><label for="seasonal-block-teacher">教師</label><input id="seasonal-block-teacher" type="text" list="seasonal-teacher-options" placeholder="選擇或輸入教師"></div>
+              <div class="form-group"><label for="seasonal-block-week-start">起始週</label><select id="seasonal-block-week-start"></select></div>
+              <div class="form-group"><label for="seasonal-block-week-end">結束週</label><select id="seasonal-block-week-end"></select></div>
+              <div class="form-group"><label for="seasonal-block-reason">原因</label><input id="seasonal-block-reason" type="text" placeholder="例：出國"></div>
+            </div>
+            <div class="flex justify-end" style="margin:8px 0 12px;"><button class="btn btn-danger btn-sm" type="button" onclick="addSeasonalTeacherBlock()">＋ 設定停排</button></div>
+            <div class="seasonal-table-scroll"><table class="data-table compact-table"><thead><tr><th>教師</th><th>停排日期</th><th>原因</th><th></th></tr></thead><tbody id="seasonal-blocks-body"></tbody></table></div>
+          </section>
+        </div>
+
+        <section class="panel-card seasonal-timetable-card">
+          <div class="seasonal-timetable-toolbar">
+            <div><div class="seasonal-section-heading"><div><span class="seasonal-step">4</span><strong>日期課表</strong></div></div><p>點擊格位手動新增或修改，拖曳已有課程可移動；第一節永遠由你手動處理。</p></div>
+            <div class="seasonal-view-controls">
+              <label for="seasonal-view-mode">檢視</label>
+              <select id="seasonal-view-mode" onchange="renderSeasonalTimetable()"><option value="class">班級課表</option><option value="teacher">教師課表</option></select>
+              <select id="seasonal-view-person" onchange="renderSeasonalTimetable()" aria-label="選擇班級或教師"></select>
+              <button class="btn btn-success btn-sm" type="button" onclick="runSeasonalAutoSchedule()">🤖 自動排課</button>
+            </div>
+          </div>
+          <div id="seasonal-schedule-summary" class="seasonal-schedule-summary"></div>
+          <div id="seasonal-timetable" class="seasonal-timetable-scroll"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /main -->
+
+<!-- 寒暑輔手動安排 Modal -->
+<div class="modal-overlay" id="seasonal-assign-modal">
+  <div class="modal-card seasonal-assign-modal-card">
+    <div class="modal-title" id="seasonal-assign-title">手動安排課程</div>
+    <input id="seasonal-assign-id" type="hidden">
+    <input id="seasonal-assign-date" type="hidden">
+    <input id="seasonal-assign-period" type="hidden">
+    <input id="seasonal-assign-class" type="hidden">
+    <div class="seasonal-assign-hint" id="seasonal-assign-hint"></div>
+    <div class="form-group"><label for="seasonal-assign-subject">科目／活動</label><input id="seasonal-assign-subject" type="text" list="seasonal-subject-options" placeholder="例：學習輔導、生物"></div>
+    <div class="form-group"><label for="seasonal-assign-teacher">教師（可留空）</label><input id="seasonal-assign-teacher" type="text" list="seasonal-teacher-options" placeholder="選擇或輸入教師"></div>
+    <label class="seasonal-lock-toggle"><input id="seasonal-assign-lock" type="checkbox">🔒 鎖定此格，自動排課不會移動或覆蓋</label>
+    <div class="modal-actions">
+      <button class="btn btn-danger" id="seasonal-assign-delete" type="button" onclick="deleteSeasonalManualCell()" hidden>清除此格</button>
+      <button class="btn btn-ghost" type="button" onclick="closeSeasonalAssignModal()">取消</button>
+      <button class="btn btn-primary" type="button" onclick="saveSeasonalManualCell()">儲存</button>
+    </div>
+  </div>
+</div>
 
 <!-- ===== 設定 Modal（GAS URL）===== -->
 <div class="modal-overlay" id="__settingsModal">
@@ -1067,7 +1181,9 @@
 <script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.4/dist/pizzip.min.js"></script>
 <script src="https://unpkg.com/file-saver@2.0.5/dist/FileSaver.min.js"></script>
    <script src="word-export.js?v=20260827_v1222_teacher_pullout_class_layout"></script>
-   <script src="app.js?v=20260826_v1212_export_excludes_preplanned"></script>
-   <script src="app-runtime.js?v=20260826_v1212_export_excludes_preplanned"></script>
+   <script src="seasonal-schedule.js?v=20260927_seasonal_tutoring_v1"></script>
+   <script src="seasonal-export.js?v=20260927_seasonal_tutoring_v1"></script>
+   <script src="app.js?v=20260927_seasonal_tutoring_v1"></script>
+   <script src="app-runtime.js?v=20260927_seasonal_tutoring_v1"></script>
 </body>
 </html>

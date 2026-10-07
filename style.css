@@ -145,6 +145,7 @@
     .seasonal-slot-button.drag-warn { box-shadow: 0 0 0 2px var(--warning) inset; background: var(--warning-light) !important; }
     .seasonal-timetable-table td.drop-ok { box-shadow: 0 0 0 2px var(--success) inset; background: var(--success-light) !important; }
     .seasonal-timetable-table td.drop-err { box-shadow: 0 0 0 2px var(--danger) inset; background: var(--danger-light) !important; }
+    .seasonal-timetable-table td.drop-warn { box-shadow: 0 0 0 2px var(--warning) inset; background: var(--warning-light) !important; }
     .seasonal-slot-button small, .seasonal-teacher-class small { display: block; color: var(--ink-2); font-size: 10px; font-weight: 500; }
     .seasonal-add-mark { color: #94a3b8; font-size: 18px; }
     .seasonal-teacher-class { display: block; margin: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 5px; background: #f8fafc; color: var(--ink); font-size: 12px; font-weight: 700; }

@@ -3647,6 +3647,54 @@ check('Seasonal schedule fills whole activity, protects manual first period, and
   });
   if (conflict.ok || !conflict.error.includes('教師')) throw new Error('人工安排未阻擋教師同時段衝堂');
 });
+check('Seasonal drag finds direct, swap, chain and cycle moves', () => {
+  const row = (id, cls, teacher, date, period, manual, locked) => ({
+    '課表ID': id, '班級代碼': cls, '科目代碼': '生物', '教師姓名': teacher,
+    '日期': date, '節次': String(period), '是否鎖定': locked ? 'TRUE' : 'FALSE',
+    '手動安排': manual ? 'TRUE' : 'FALSE', '需求ID': ''
+  });
+  const makeContext = (days, schedule) => {
+    const context = { window: {} };
+    context.window = context;
+    vm.createContext(context);
+    vm.runInContext(seasonal, context, { filename: 'seasonal-schedule.js' });
+    context.state = { seasonalDays: days, seasonalTeacherBlocks: [], seasonalSchedule: schedule };
+    return context;
+  };
+  const find = (context, id, date, period) => vm.runInContext(
+    `seasonalFindMoveChain(${JSON.stringify(id)}, ${JSON.stringify(date)}, ${period})`, context);
+  const day = date => ({ '日期': date, '是否上課': 'TRUE' });
+  const context = makeContext([day('2026-07-20'), day('2026-07-21')], [
+    row('A', '901', '王', '2026-07-20', 2, false),
+    row('B', '901', '李', '2026-07-20', 4, false),
+    row('C', '902', '李', '2026-07-20', 2, false)
+  ]);
+  const direct = find(context, 'A', '2026-07-21', 2);
+  if (!direct.ok || direct.kind !== 'move' || direct.moves.length !== 1) throw new Error('空白格直接移動試算錯誤');
+  const chain = find(context, 'A', '2026-07-20', 4);
+  if (!chain.ok || chain.kind !== 'chain' || chain.moves.length !== 2) throw new Error('搬移連動試算錯誤');
+  if (chain.moves[0].id !== 'A' || chain.moves[1].id !== 'B') throw new Error('搬移連動對象錯誤');
+  const same = find(context, 'A', '2026-07-20', 2);
+  if (same.ok || same.error !== '') throw new Error('原地拖曳應靜默忽略');
+  const lockedContext = makeContext([day('2026-07-20'), day('2026-07-21')], [
+    row('A', '901', '王', '2026-07-20', 2, false),
+    row('B', '901', '李', '2026-07-20', 4, false, true),
+    row('C', '902', '李', '2026-07-20', 2, false)
+  ]);
+  const locked = find(lockedContext, 'A', '2026-07-20', 4);
+  if (locked.ok || !locked.error.includes('連動')) throw new Error('鎖定佔位應提示找不到連動位置');
+  const cycleContext = makeContext([day('2026-07-20')], [
+    row('A', '901', '王', '2026-07-20', 1, true),
+    row('B', '901', '李', '2026-07-20', 4, false),
+    row('C', '902', '李', '2026-07-20', 3, true),
+    row('D', '901', '英', '2026-07-20', 2, false),
+    row('F', '901', '健', '2026-07-20', 5, false)
+  ]);
+  const cycle = find(cycleContext, 'A', '2026-07-20', 4);
+  if (!cycle.ok || cycle.kind !== 'cycle' || cycle.moves.length !== 3) throw new Error('三門循環對調試算錯誤');
+  if (cycle.moves[0].id !== 'A' || cycle.moves[1].id !== 'B' || cycle.moves[2].id !== 'C') throw new Error('循環對調順序錯誤');
+  if (cycle.moves[2].date !== '2026-07-20' || cycle.moves[2].period !== 1) throw new Error('循環應回到來源格位');
+});
 check('Seasonal GAS bundle validates five-period date schedules independently', () => {
   const start = backend.indexOf('function seasonalIsoDate_');
   const end = backend.indexOf('function saveSeasonalBundle_', start);

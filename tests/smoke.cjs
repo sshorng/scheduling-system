@@ -3687,29 +3687,61 @@ check('Seasonal Excel exports valid Open XML layout and both timetable views', (
     generate() { return { type: 'mock-xlsx' }; }
   }
   let savedFileName = '';
-  const context = { PizZip: MockZip, saveAs(_blob, name) { savedFileName = name; } };
+  const context = {
+    PizZip: MockZip,
+    saveAs(_blob, name) { savedFileName = name; },
+    state: { classes: [{ '班級代碼': '901', '班級名稱': '九年一班' }] },
+    seasonalIso: value => String(value).slice(0, 10),
+    xlsxXmlEscape: value => String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  };
+  context.xlsxSetInlineString = (sheetXml, cellRef, value) => {
+    const escapedRef = String(cellRef || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(<c\\b[^>]*\\br="' + escapedRef + '"[^>]*)(?:/>|>[\\s\\S]*?<\\/c>)');
+    return String(sheetXml || '').replace(re, (whole, open) => {
+      const attrs = open.replace(/\s+t="[^"]*"/g, '');
+      return attrs + ' t="inlineStr"><is><t>' + context.xlsxXmlEscape(value) + '</t></is></c>';
+    });
+  };
   context.window = context;
   vm.createContext(context);
   vm.runInContext(seasonalExport, context, { filename: 'seasonal-export.js' });
-  const xml = context.seasonalExcelWorksheetXml([
-    [{ v: '暑輔班級課表', s: 1 }, null],
-    [{ v: '日期', s: 2 }, { v: '第一節\n07:40－08:25', s: 2 }],
-    [{ v: '07/20(週一)', s: 3 }, { v: '學習輔導', s: 5 }]
-  ], { widths: [15, 12], merges: ['A1:B1'] });
-  if (!xml.includes('dimension ref="A1:B3"') || !xml.includes('<mergeCell ref="A1:B1"/>') || !xml.includes('學習輔導')) throw new Error('Excel 工作表 Open XML 結構不完整');
-  const worksheetOrder = ['<sheetPr>', '<dimension ', '<sheetViews>', '<sheetFormatPr ', '<cols>', '<sheetData>', '<mergeCells', '<printOptions', '<pageMargins ', '<pageSetup ', '<headerFooter>'];
-  let worksheetCursor = -1;
-  for (const token of worksheetOrder) {
-    const tokenIndex = xml.indexOf(token);
-    if (tokenIndex < 0) throw new Error('Excel 工作表缺少必要元素：' + token);
-    if (tokenIndex < worksheetCursor) throw new Error('Excel 工作表元素順序違反 CT_Worksheet 結構：' + token);
-    worksheetCursor = tokenIndex;
+  if (context.seasonalTplDateLabel('2026-07-20') !== '7/20(一)') throw new Error('上課日標籤格式錯誤');
+  if (context.seasonalTplTimeHeader({ start: '07:40', end: '08:25' }, 0) !== '第一節\n07:40-08:25') throw new Error('節次標題格式錯誤');
+  const tplClass = '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:K4"/><sheetData>'
+    + '<row r="1"><c r="A1" s="1"/></row>'
+    + '<row r="2"><c r="A2" s="2"/><c r="B2" s="2"/><c r="C2" s="2"/><c r="D2" s="2"/><c r="E2" s="2"/><c r="F2" s="2"/><c r="H2" s="2"/></row>'
+    + '<row r="3"><c r="A3" s="3"/><c r="B3" s="4"/><c r="C3" s="4"/><c r="D3" s="4"/><c r="E3" s="4"/><c r="F3" s="4"/><c r="H3" s="4"/><c r="I3" s="4"/><c r="J3" s="4"/><c r="K3" s="4"/></row>'
+    + '<row r="4"><c r="A4" s="3"/><c r="B4" s="4"/></row>'
+    + '</sheetData></worksheet>';
+  const classData = {
+    title: '測試國中115學年度暑假學藝活動', days: ['2026-07-20'],
+    schedule: [
+      { '班級代碼': '901', '日期': '2026-07-20', '節次': 1, '科目代碼': '學習輔導', '教師姓名': '導師' },
+      { '班級代碼': '901', '日期': '2026-07-20', '節次': 2, '科目代碼': '國文', '教師姓名': '莊英勝' }
+    ],
+    needs: [{ '班級代碼': '901', '科目代碼': '國文', '教師姓名': '莊英勝' }],
+    periodTimes: [{ start: '07:40', end: '08:25' }, { start: '08:30', end: '09:15' }, { start: '09:25', end: '10:10' }, { start: '10:20', end: '11:05' }, { start: '11:15', end: '12:00' }]
+  };
+  const classSheet = context.seasonalFillClassSheet(tplClass, '901', classData);
+  if (classSheet.name !== '901') throw new Error('班級工作表名稱錯誤');
+  for (const text of ['測試國中115學年度暑假學藝活動班級課表', '>901<', '第一節', '07:40-08:25', '九年一班', '7/20(一)', '學習輔導', '國文', '>科目<', '>教師<']) {
+    if (!classSheet.xml.includes(text)) throw new Error('班級工作表缺少內容：' + text);
   }
-  context.seasonalCreateXlsx([{ name: '901', rows: [[{ v: '班級課表', s: 1 }]], merges: ['A1:B1'], widths: [12, 12] }], '寒暑輔.xlsx');
+  if (!classSheet.xml.includes('dimension ref="A1:K3"') || classSheet.xml.includes('<row r="4"')) throw new Error('班級工作表多餘列未清除');
+  const tplTeacher = tplClass.replace('A1:K4', 'A1:F4');
+  const teacherSheet = context.seasonalFillTeacherSheet(tplTeacher, '莊英勝', {
+    ...classData,
+    schedule: classData.schedule.map(row => ({ ...row, '教師姓名': '莊英勝' }))
+  });
+  if (!teacherSheet.xml.includes('教師課表') || !teacherSheet.xml.includes('>莊英勝<') || !teacherSheet.xml.includes('7/20(一)')) throw new Error('教師工作表內容錯誤');
+  if (!teacherSheet.xml.includes('dimension ref="A1:F3"')) throw new Error('教師工作表範圍錯誤');
+  const tpl = { stylesXml: '<styleSheet/>', themeXml: null };
+  context.seasonalCreateXlsx([{ name: '901', xml: '<worksheet/>' }], '寒暑輔.xlsx', tpl);
   if (savedFileName !== '寒暑輔.xlsx' || !files.has('xl/worksheets/sheet1.xml') || !files.has('xl/styles.xml') || !files.get('xl/workbook.xml').includes('name="901"')) {
     throw new Error('未建立包含工作表與樣式的 xlsx Open XML 封裝');
   }
-  for (const marker of ['function seasonalClassWorksheet', 'function seasonalTeacherWorksheet', '班級課表', '教師課表', '.xlsx']) {
+  if (files.has('xl/theme/theme1.xml')) throw new Error('無範本主題時不應輸出 theme');
+  for (const marker of ['function seasonalFillClassSheet', 'function seasonalFillTeacherSheet', 'seasonal-class-template', 'seasonal-teacher-template', '班級課表', '教師課表', '.xlsx']) {
     if (!seasonalExport.includes(marker)) throw new Error('班級／教師 Excel 匯出功能缺少：' + marker);
   }
   for (const id of ['panel-seasonal', 'seasonal-days-list', 'seasonal-needs-body', 'seasonal-blocks-body', 'seasonal-timetable', 'seasonal-assign-modal', 'seasonal-assign-lock']) {

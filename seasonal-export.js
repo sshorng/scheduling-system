@@ -40,7 +40,7 @@ function seasonalExcelWorksheetXml(rows, options = {}) {
     '<dimension ref="' + dimension + '"/><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews>' +
     '<sheetFormatPr defaultRowHeight="25"/><cols>' + cols + '</cols><sheetData>' + sheetRows + '</sheetData>' + mergeXml +
     '<printOptions horizontalCentered="1"/><pageMargins left="0.25" right="0.25" top="0.35" bottom="0.35" header="0.15" footer="0.15"/>' +
-    '<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="1"/><headerFooter><oddFooter><![CDATA[&C第 &P 頁，共 &N 頁]]></oddFooter></headerFooter>' +
+    '<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="1"/><headerFooter><oddFooter>&amp;C第 &amp;P 頁，共 &amp;N 頁</oddFooter></headerFooter>' +
     '</worksheet>';
 }
 

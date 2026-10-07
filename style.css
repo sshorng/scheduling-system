@@ -139,9 +139,15 @@
     .seasonal-slot-button.is-manual-period { background: #e2e8f0; }
     .seasonal-slot-button.has-course { border-style: solid; border-color: var(--border); background: #f8fafc; font-weight: 700; }
     .seasonal-slot-button.is-manual-period.has-course { background: #e2e8f0; }
+    .seasonal-slot-button.is-dragging { opacity: .3; }
+    .seasonal-slot-button.drag-ok { box-shadow: 0 0 0 2px var(--success) inset; background: var(--success-light) !important; }
+    .seasonal-slot-button.drag-err { box-shadow: 0 0 0 2px var(--danger) inset; background: var(--danger-light) !important; }
+    .seasonal-slot-button.drag-warn { box-shadow: 0 0 0 2px var(--warning) inset; background: var(--warning-light) !important; }
+    .seasonal-timetable-table td.drop-ok { box-shadow: 0 0 0 2px var(--success) inset; background: var(--success-light) !important; }
+    .seasonal-timetable-table td.drop-err { box-shadow: 0 0 0 2px var(--danger) inset; background: var(--danger-light) !important; }
     .seasonal-slot-button small, .seasonal-teacher-class small { display: block; color: var(--ink-2); font-size: 10px; font-weight: 500; }
     .seasonal-add-mark { color: #94a3b8; font-size: 18px; }
-    .seasonal-teacher-class { display: block; margin: 2px; padding: 4px; border-radius: 4px; background: #dbeafe; color: #1e3a8a; font-size: 12px; font-weight: 700; }
+    .seasonal-teacher-class { display: block; margin: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 5px; background: #f8fafc; color: var(--ink); font-size: 12px; font-weight: 700; }
     .seasonal-slot-button .cell-chip { display: inline-block; margin: 0 auto 2px; max-width: 100%; }
     .seasonal-teacher-class .cell-chip { display: inline-block; margin-top: 2px; max-width: 100%; }
     #seasonal-block-grid { max-height: 320px; }

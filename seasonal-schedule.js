@@ -937,6 +937,15 @@ function clearSeasonalSelectedSlots() {
   updateSeasonalSelectionUI();
 }
 
+function clearSeasonalDragHighlights() {
+  document.querySelectorAll('.seasonal-slot-button.drag-ok, .seasonal-slot-button.drag-err, .seasonal-slot-button.drag-warn, .seasonal-slot-button.is-dragging').forEach(button => {
+    button.classList.remove('drag-ok', 'drag-err', 'drag-warn', 'is-dragging');
+  });
+  document.querySelectorAll('.seasonal-timetable-table td.drop-ok, .seasonal-timetable-table td.drop-err').forEach(cell => {
+    cell.classList.remove('drop-ok', 'drop-err');
+  });
+}
+
 function updateSeasonalSelectionUI() {
   const count = seasonalSelectedSlots.size;
   const bar = document.getElementById('seasonal-batch-bar');
@@ -1102,6 +1111,85 @@ async function batchClearSeasonalSelectedSlots() {
   }
 }
 
+function bindSeasonalSlotButton(button) {
+  button.addEventListener('click', (event) => {
+    if (seasonalSuppressSeasonalClick) {
+      seasonalSuppressSeasonalClick = false;
+      return;
+    }
+    const chk = document.getElementById('seasonal-multi-select-mode');
+    const isMulti = (chk && chk.checked) || seasonalMultiSelectMode || event.ctrlKey || event.metaKey || event.shiftKey;
+    const key = seasonalSlotKey(button.dataset.class, button.dataset.date, button.dataset.period);
+    if (!button.dataset.class && !button.dataset.id) return;
+    if (isMulti) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (seasonalSelectedSlots.has(key)) {
+        seasonalSelectedSlots.delete(key);
+      } else {
+        seasonalSelectedSlots.set(key, {
+          classCode: button.dataset.class,
+          date: button.dataset.date,
+          period: Number(button.dataset.period),
+          id: button.dataset.id
+        });
+      }
+      updateSeasonalSelectionUI();
+      return;
+    }
+    if (seasonalSelectedSlots.size > 1 && seasonalSelectedSlots.has(key)) {
+      openSeasonalBatchAssignModal();
+      return;
+    }
+    seasonalSelectedSlots.clear();
+    updateSeasonalSelectionUI();
+    openSeasonalAssignModal(button.dataset.class, button.dataset.date, Number(button.dataset.period));
+  });
+  button.addEventListener('dragstart', event => {
+    if (!button.dataset.id) { event.preventDefault(); return; }
+    seasonalSuppressSeasonalClick = true;
+    seasonalSelectedSlots.clear();
+    updateSeasonalSelectionUI();
+    clearSeasonalDragHighlights();
+    button.classList.add('is-dragging');
+    seasonalDraggingScheduleId = button.dataset.id;
+    event.dataTransfer?.setData('text/plain', seasonalDraggingScheduleId);
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+  });
+  button.addEventListener('dragover', event => {
+    const id = seasonalDraggingScheduleId;
+    const targetId = button.dataset.id;
+    if (!id || id === targetId) {
+      button.classList.remove('drag-ok', 'drag-err', 'drag-warn');
+      return;
+    }
+    const preview = targetId
+      ? seasonalPreviewSwapPlacement(id, targetId)
+      : seasonalPreviewMovePlacement(id, button.dataset.date, Number(button.dataset.period));
+    event.preventDefault();
+    button.classList.remove('drag-ok', 'drag-err', 'drag-warn');
+    button.classList.add(preview.ok ? 'drag-ok' : 'drag-err');
+  });
+  button.addEventListener('dragleave', () => {
+    button.classList.remove('drag-ok', 'drag-err', 'drag-warn');
+  });
+  button.addEventListener('drop', event => {
+    event.preventDefault();
+    const id = seasonalDraggingScheduleId || event.dataTransfer?.getData('text/plain');
+    const targetId = button.dataset.id;
+    seasonalDraggingScheduleId = '';
+    clearSeasonalDragHighlights();
+    if (!id || id === targetId) return;
+    if (!targetId) moveSeasonalCell(id, button.dataset.date, Number(button.dataset.period));
+    else swapSeasonalCells(id, targetId);
+  });
+  button.addEventListener('dragend', () => {
+    seasonalDraggingScheduleId = '';
+    clearSeasonalDragHighlights();
+    setTimeout(() => { seasonalSuppressSeasonalClick = false; }, 0);
+  });
+}
+
 function renderSeasonalTimetable() {
   const wrap = document.getElementById('seasonal-timetable');
   if (!wrap || !seasonalActiveSession()) return;
@@ -1131,65 +1219,7 @@ function renderSeasonalTimetable() {
       return '<tr>' + cells.join('') + '</tr>';
     }).join('');
     wrap.innerHTML = '<table class="seasonal-timetable-table">' + head + '<tbody>' + rows + '</tbody></table>';
-        wrap.querySelectorAll('.seasonal-slot-button').forEach(button => {
-      button.addEventListener('click', (event) => {
-        if (seasonalSuppressSeasonalClick) {
-          seasonalSuppressSeasonalClick = false;
-          return;
-        }
-        const chk = document.getElementById('seasonal-multi-select-mode');
-        const isMulti = (chk && chk.checked) || seasonalMultiSelectMode || event.ctrlKey || event.metaKey || event.shiftKey;
-        const key = seasonalSlotKey(button.dataset.class, button.dataset.date, button.dataset.period);
-        if (isMulti) {
-          event.preventDefault();
-          event.stopPropagation();
-          if (seasonalSelectedSlots.has(key)) {
-            seasonalSelectedSlots.delete(key);
-          } else {
-            seasonalSelectedSlots.set(key, {
-              classCode: button.dataset.class,
-              date: button.dataset.date,
-              period: Number(button.dataset.period),
-              id: button.dataset.id
-            });
-          }
-          updateSeasonalSelectionUI();
-          return;
-        }
-        if (seasonalSelectedSlots.size > 1 && seasonalSelectedSlots.has(key)) {
-          openSeasonalBatchAssignModal();
-          return;
-        }
-        seasonalSelectedSlots.clear();
-        updateSeasonalSelectionUI();
-        openSeasonalAssignModal(button.dataset.class, button.dataset.date, Number(button.dataset.period));
-      });
-      button.addEventListener('dragstart', event => {
-        if (!button.dataset.id) { event.preventDefault(); return; }
-        seasonalSuppressSeasonalClick = true;
-        seasonalSelectedSlots.clear();
-        updateSeasonalSelectionUI();
-        seasonalDraggingScheduleId = button.dataset.id;
-        event.dataTransfer?.setData('text/plain', seasonalDraggingScheduleId);
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-      });
-      button.addEventListener('dragover', event => {
-        if (seasonalDraggingScheduleId && button.dataset.id !== seasonalDraggingScheduleId) event.preventDefault();
-      });
-      button.addEventListener('drop', event => {
-        event.preventDefault();
-        const id = seasonalDraggingScheduleId || event.dataTransfer?.getData('text/plain');
-        const targetId = button.dataset.id;
-        seasonalDraggingScheduleId = '';
-        if (!id || id === targetId) return;
-        if (!targetId) moveSeasonalCell(id, button.dataset.date, Number(button.dataset.period));
-        else swapSeasonalCells(id, targetId);
-      });
-      button.addEventListener('dragend', () => {
-        seasonalDraggingScheduleId = '';
-        setTimeout(() => { seasonalSuppressSeasonalClick = false; }, 0);
-      });
-    });
+    wrap.querySelectorAll('.seasonal-slot-button').forEach(bindSeasonalSlotButton);
     updateSeasonalSelectionUI();
   } else {
     const rows = days.map(date => {
@@ -1197,12 +1227,41 @@ function renderSeasonalTimetable() {
       const cells = ['<td class="seasonal-date-cell"><b>' + esc(seasonalDisplayDate(date)) + '</b><small>第' + week + '週</small></td>'];
       for (let period = 1; period <= 5; period++) {
         const items = schedule.filter(row => seasonalText(row['教師姓名']) === person && seasonalIso(row['日期']) === date && Number(row['節次']) === period);
-        const cell = items.map(row => '<span class="seasonal-teacher-class">' + esc(row['班級代碼']) + '<small>' + seasonalCourseChip(row['科目代碼'], row['班級代碼']) + '</small></span>').join('');
-        cells.push('<td class="' + (period === 1 ? 'is-manual-period ' : '') + '">' + (cell || '') + '</td>');
+        const cell = items.map(row => {
+          const canDrag = !seasonalIsTrue(row['是否鎖定']);
+          return '<button class="seasonal-slot-button has-course" type="button" draggable="' + (canDrag ? 'true' : 'false') + '" data-id="' + esc(row['課表ID']) + '" data-class="' + esc(row['班級代碼']) + '" data-date="' + esc(date) + '" data-period="' + period + '">' + esc(row['班級代碼']) + '<small>' + seasonalCourseChip(row['科目代碼'], row['班級代碼']) + '</small></button>';
+        }).join('');
+        cells.push('<td data-drop-date="' + esc(date) + '" data-drop-period="' + period + '" class="' + (period === 1 ? 'is-manual-period ' : '') + '">' + (cell || '') + '</td>');
       }
       return '<tr>' + cells.join('') + '</tr>';
     }).join('');
     wrap.innerHTML = '<table class="seasonal-timetable-table">' + head + '<tbody>' + rows + '</tbody></table>';
+    wrap.querySelectorAll('.seasonal-slot-button').forEach(bindSeasonalSlotButton);
+    wrap.querySelectorAll('td[data-drop-date]').forEach(td => {
+      td.addEventListener('dragover', event => {
+        const id = seasonalDraggingScheduleId;
+        if (!id) {
+          td.classList.remove('drop-ok', 'drop-err');
+          return;
+        }
+        const preview = seasonalPreviewMovePlacement(id, td.dataset.dropDate, Number(td.dataset.dropPeriod));
+        event.preventDefault();
+        td.classList.remove('drop-ok', 'drop-err');
+        td.classList.add(preview.ok ? 'drop-ok' : 'drop-err');
+      });
+      td.addEventListener('dragleave', () => {
+        td.classList.remove('drop-ok', 'drop-err');
+      });
+      td.addEventListener('drop', event => {
+        event.preventDefault();
+        const id = seasonalDraggingScheduleId || event.dataTransfer?.getData('text/plain');
+        seasonalDraggingScheduleId = '';
+        clearSeasonalDragHighlights();
+        if (!id) return;
+        moveSeasonalCell(id, td.dataset.dropDate, Number(td.dataset.dropPeriod));
+      });
+    });
+    updateSeasonalSelectionUI();
   }
   const currentNeeds = seasonalActiveRows('seasonalNeeds');
   const total = currentNeeds.reduce((sum, row) => sum + (parseInt(row['本期節數'], 10) || 0), 0);
@@ -1230,23 +1289,41 @@ function closeSeasonalAssignModal() {
   document.getElementById('seasonal-assign-modal')?.classList.remove('show');
 }
 
-async function swapSeasonalCells(sourceId, targetId) {
+function seasonalPreviewMovePlacement(scheduleId, date, period) {
+  const normalizedId = seasonalText(scheduleId);
+  const targetDate = seasonalIso(date);
+  const targetPeriod = Number(period);
+  const row = seasonalActiveRows('seasonalSchedule').find(item => seasonalText(item['課表ID']) === normalizedId);
+  if (!row) return { ok: false, error: '找不到要移動的課程。' };
+  if (seasonalIsTrue(row['是否鎖定'])) return { ok: false, error: '此課程已鎖定，請先點開格位解除鎖定再移動。' };
+  if (!seasonalActiveRows('seasonalDays').some(item => seasonalIso(item['日期']) === targetDate && seasonalIsTrue(item['是否上課']))) {
+    return { ok: false, error: '只能移至實際上課日。' };
+  }
+  if (targetPeriod === 1 && !seasonalIsTrue(row['手動安排'])) {
+    return { ok: false, error: '第一節只能手動安排，請先以手動方式建立此格。' };
+  }
+  return seasonalCheckManualPlacement({
+    classCode: row['班級代碼'], date: targetDate, period: targetPeriod, subject: row['科目代碼'], teacherCode: row['教師姓名'],
+    schedule: seasonalActiveRows('seasonalSchedule'), teacherBlocks: seasonalActiveRows('seasonalTeacherBlocks'), excludeId: normalizedId
+  });
+}
+
+function seasonalPreviewSwapPlacement(sourceId, targetId) {
   const normalizedSourceId = seasonalText(sourceId);
   const normalizedTargetId = seasonalText(targetId);
-  if (!normalizedSourceId || normalizedSourceId === normalizedTargetId) return;
+  if (!normalizedSourceId || !normalizedTargetId) return { ok: false, error: '找不到要對調的課程。' };
+  if (normalizedSourceId === normalizedTargetId) return { ok: false, error: '' };
   const rows = seasonalActiveRows('seasonalSchedule');
   const source = rows.find(item => seasonalText(item['課表ID']) === normalizedSourceId);
   const target = rows.find(item => seasonalText(item['課表ID']) === normalizedTargetId);
-  if (!source || !target) return;
+  if (!source || !target) return { ok: false, error: '找不到要對調的課程。' };
   if (seasonalIsTrue(source['是否鎖定']) || seasonalIsTrue(target['是否鎖定'])) {
-    toast('對調的其中一門課程已鎖定，請先解除鎖定再對調。', 'warning');
-    return;
+    return { ok: false, error: '對調的其中一門課程已鎖定，請先解除鎖定再對調。' };
   }
   const sourceClass = seasonalText(source['班級代碼']);
   const targetClass = seasonalText(target['班級代碼']);
-  if (!sourceClass || sourceClass !== targetClass) {
-    toast('只能在同一班級日期課表內對調課程。', 'warning');
-    return;
+  if (!sourceClass || !targetClass) {
+    return { ok: false, error: '對調課程缺少班級資料。' };
   }
   const sourceDate = seasonalIso(source['日期']);
   const sourcePeriod = Number(source['節次']);
@@ -1254,16 +1331,13 @@ async function swapSeasonalCells(sourceId, targetId) {
   const targetPeriod = Number(target['節次']);
   const isTeachingDay = date => seasonalActiveRows('seasonalDays').some(item => seasonalIso(item['日期']) === date && seasonalIsTrue(item['是否上課']));
   if (!isTeachingDay(sourceDate) || !isTeachingDay(targetDate)) {
-    toast('只能在實際上課日之間對調課程。', 'warning');
-    return;
+    return { ok: false, error: '只能在實際上課日之間對調課程。' };
   }
   if (targetPeriod === 1 && !seasonalIsTrue(source['手動安排'])) {
-    toast('第一節只能手動安排，請先以手動方式建立此格。', 'warning');
-    return;
+    return { ok: false, error: '第一節只能手動安排，請先以手動方式建立此格。' };
   }
   if (sourcePeriod === 1 && !seasonalIsTrue(target['手動安排'])) {
-    toast('第一節只能手動安排，請先以手動方式建立此格。', 'warning');
-    return;
+    return { ok: false, error: '第一節只能手動安排，請先以手動方式建立此格。' };
   }
   const remainingRows = rows.filter(item => {
     const id = seasonalText(item['課表ID']);
@@ -1274,18 +1348,30 @@ async function swapSeasonalCells(sourceId, targetId) {
     classCode: sourceClass, date: targetDate, period: targetPeriod, subject: source['科目代碼'], teacherCode: source['教師姓名'],
     schedule: remainingRows, teacherBlocks, excludeId: normalizedSourceId
   });
-  if (!sourceValidation.ok) {
-    toast(sourceValidation.error, 'warning');
-    return;
-  }
-  const targetValidation = seasonalCheckManualPlacement({
+  if (!sourceValidation.ok) return sourceValidation;
+  return seasonalCheckManualPlacement({
     classCode: targetClass, date: sourceDate, period: sourcePeriod, subject: target['科目代碼'], teacherCode: target['教師姓名'],
     schedule: remainingRows, teacherBlocks, excludeId: normalizedTargetId
   });
-  if (!targetValidation.ok) {
-    toast(targetValidation.error, 'warning');
+}
+
+async function swapSeasonalCells(sourceId, targetId) {
+  const normalizedSourceId = seasonalText(sourceId);
+  const normalizedTargetId = seasonalText(targetId);
+  if (!normalizedSourceId || normalizedSourceId === normalizedTargetId) return;
+  const preview = seasonalPreviewSwapPlacement(normalizedSourceId, normalizedTargetId);
+  if (!preview.ok) {
+    if (preview.error) toast(preview.error, 'warning');
     return;
   }
+  const rows = seasonalActiveRows('seasonalSchedule');
+  const source = rows.find(item => seasonalText(item['課表ID']) === normalizedSourceId);
+  const target = rows.find(item => seasonalText(item['課表ID']) === normalizedTargetId);
+  if (!source || !target) return;
+  const sourceDate = seasonalIso(source['日期']);
+  const sourcePeriod = Number(source['節次']);
+  const targetDate = seasonalIso(target['日期']);
+  const targetPeriod = Number(target['節次']);
   source['日期'] = targetDate;
   source['節次'] = String(targetPeriod);
   source['手動安排'] = 'TRUE';
@@ -1297,29 +1383,14 @@ async function swapSeasonalCells(sourceId, targetId) {
 }
 
 async function moveSeasonalCell(scheduleId, date, period) {
-  const row = seasonalActiveRows('seasonalSchedule').find(item => seasonalText(item['課表ID']) === seasonalText(scheduleId));
-  if (!row) return;
-  if (seasonalIsTrue(row['是否鎖定'])) {
-    toast('此課程已鎖定，請先點開格位解除鎖定再移動。', 'warning');
+  const preview = seasonalPreviewMovePlacement(scheduleId, date, period);
+  if (!preview.ok) {
+    toast(preview.error, 'warning');
     return;
   }
   const targetDate = seasonalIso(date);
-  if (!seasonalActiveRows('seasonalDays').some(item => seasonalIso(item['日期']) === targetDate && seasonalIsTrue(item['是否上課']))) {
-    toast('只能移至實際上課日。', 'warning');
-    return;
-  }
-  if (Number(period) === 1 && !seasonalIsTrue(row['手動安排'])) {
-    toast('第一節只能手動安排，請先以手動方式建立此格。', 'warning');
-    return;
-  }
-  const validation = seasonalCheckManualPlacement({
-    classCode: row['班級代碼'], date: targetDate, period, subject: row['科目代碼'], teacherCode: row['教師姓名'],
-    schedule: seasonalActiveRows('seasonalSchedule'), teacherBlocks: seasonalActiveRows('seasonalTeacherBlocks'), excludeId: scheduleId
-  });
-  if (!validation.ok) {
-    toast(validation.error, 'warning');
-    return;
-  }
+  const row = seasonalActiveRows('seasonalSchedule').find(item => seasonalText(item['課表ID']) === seasonalText(scheduleId));
+  if (!row) return;
   row['日期'] = targetDate;
   row['節次'] = String(period);
   row['手動安排'] = 'TRUE';

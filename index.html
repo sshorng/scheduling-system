@@ -877,7 +877,17 @@
           <section class="panel-card">
             <div class="seasonal-section-heading"><div><span class="seasonal-step">2</span><strong>班級課程需求</strong></div></div>
             <div class="seasonal-form-grid">
-              <div class="form-group"><label for="seasonal-need-class">班級</label><select id="seasonal-need-class"></select></div>
+              <div class="form-group seasonal-classes-picker-group" style="grid-column: 1 / -1;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                  <label style="margin-bottom:0; font-weight:700;">班級（只開九年級，可多選）</label>
+                  <div style="display:flex; gap:6px;">
+                    <button type="button" class="btn btn-ghost btn-xs" onclick="seasonalToggleAllNeedClasses(true)">全選九年級</button>
+                    <button type="button" class="btn btn-ghost btn-xs" onclick="seasonalToggleAllNeedClasses(false)">全部取消</button>
+                  </div>
+                </div>
+                <div id="seasonal-need-classes-container" class="seasonal-need-classes-container"></div>
+                <select id="seasonal-need-class" style="display:none;"></select>
+              </div>
               <div class="form-group"><label for="seasonal-need-subject">科目</label><input id="seasonal-need-subject" type="text" list="seasonal-subject-options" placeholder="例：生物"><datalist id="seasonal-subject-options"></datalist></div>
               <div class="form-group"><label for="seasonal-need-teacher">教師</label><input id="seasonal-need-teacher" type="text" list="seasonal-teacher-options" placeholder="選擇或輸入教師"><datalist id="seasonal-teacher-options"></datalist></div>
               <div class="form-group"><label for="seasonal-need-count">本期節數</label><input id="seasonal-need-count" type="number" min="1" step="1" value="1"></div>
@@ -908,7 +918,23 @@
               <label for="seasonal-view-mode">檢視</label>
               <select id="seasonal-view-mode" onchange="renderSeasonalTimetable()"><option value="class">班級課表</option><option value="teacher">教師課表</option></select>
               <select id="seasonal-view-person" onchange="renderSeasonalTimetable()" aria-label="選擇班級或教師"></select>
+              <label class="seasonal-multi-select-toggle" id="seasonal-multi-select-label" title="勾選後可點選多表格位，或按住 Ctrl 點選多格" style="display:inline-flex; align-items:center; gap:5px; font-size:12px; cursor:pointer; padding:3px 8px; border:1px solid var(--border); border-radius:4px; background:var(--surface); user-select:none;">
+                <input type="checkbox" id="seasonal-multi-select-mode" onchange="toggleSeasonalMultiSelectMode(this.checked)" style="margin:0; width:13px; height:13px; accent-color:var(--accent);">
+                <span>多選排課</span>
+              </label>
               <button class="btn btn-success btn-sm" type="button" onclick="runSeasonalAutoSchedule()">🤖 自動排課</button>
+            </div>
+          </div>
+          <!-- 批次選取操作列 -->
+          <div id="seasonal-batch-bar" class="seasonal-batch-bar" style="display:none;">
+            <div class="seasonal-batch-bar-info">
+              <span>🎯 已選取 <strong id="seasonal-batch-count">0</strong> 格</span>
+              <small class="text-muted" id="seasonal-batch-hint">（支援跨日期、節次批次排入課程／教師）</small>
+            </div>
+            <div class="seasonal-batch-bar-actions">
+              <button class="btn btn-primary btn-sm" type="button" onclick="openSeasonalBatchAssignModal()">✏️ 批次排入課程／教師</button>
+              <button class="btn btn-danger btn-sm" type="button" onclick="batchClearSeasonalSelectedSlots()">🗑 批次清除</button>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="clearSeasonalSelectedSlots()">✕ 取消選取</button>
             </div>
           </div>
           <div id="seasonal-schedule-summary" class="seasonal-schedule-summary"></div>
@@ -936,6 +962,32 @@
       <button class="btn btn-danger" id="seasonal-assign-delete" type="button" onclick="deleteSeasonalManualCell()" hidden>清除此格</button>
       <button class="btn btn-ghost" type="button" onclick="closeSeasonalAssignModal()">取消</button>
       <button class="btn btn-primary" type="button" onclick="saveSeasonalManualCell()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 寒暑輔批次安排 Modal -->
+<div class="modal-overlay" id="seasonal-batch-assign-modal">
+  <div class="modal-card seasonal-assign-modal-card">
+    <div class="modal-title" id="seasonal-batch-assign-title">批次安排課程與教師</div>
+    <div class="seasonal-assign-hint" id="seasonal-batch-assign-hint"></div>
+    <div class="form-group" style="margin-top:10px;">
+      <label for="seasonal-batch-subject">科目／活動</label>
+      <input id="seasonal-batch-subject" type="text" list="seasonal-subject-options" placeholder="例：學習輔導、生物、國文">
+    </div>
+    <div class="form-group">
+      <label for="seasonal-batch-teacher">教師（可輸入或選擇教師）</label>
+      <input id="seasonal-batch-teacher" type="text" list="seasonal-teacher-options" placeholder="選擇或輸入教師">
+    </div>
+    <label class="seasonal-lock-toggle">
+      <input id="seasonal-batch-lock" type="checkbox" checked>🔒 鎖定這些格位，自動排課不會移動或覆蓋
+    </label>
+    <label class="seasonal-lock-toggle" style="margin-top:4px;">
+      <input id="seasonal-batch-overwrite" type="checkbox" checked>若格位已有其他課程，允許覆蓋
+    </label>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn btn-ghost" type="button" onclick="closeSeasonalBatchAssignModal()">取消</button>
+      <button class="btn btn-primary" type="button" onclick="saveSeasonalBatchAssign()">確定批次排入</button>
     </div>
   </div>
 </div>

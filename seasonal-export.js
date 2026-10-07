@@ -215,7 +215,16 @@ function exportSeasonalWorkbook(mode) {
       ...seasonalActiveRows('seasonalTeacherBlocks').map(row => String(row['教師姓名'] || '').trim())
     ].filter(Boolean));
     const isClass = mode === 'class';
-    const names = [...(isClass ? classes : teachers)].sort((a, b) => a.localeCompare(b, 'zh-Hant', { numeric: true }));
+    let names = [...(isClass ? classes : teachers)].sort((a, b) => a.localeCompare(b, 'zh-Hant', { numeric: true }));
+    if (isClass) {
+      const grade9Classes = typeof seasonalGetGrade9Classes === 'function' ? seasonalGetGrade9Classes() : [];
+      if (grade9Classes.length > 0) {
+        const grade9Set = new Set(grade9Classes.map(c => seasonalText(c['班級代碼'])));
+        names = names.filter(code => grade9Set.has(code));
+      } else {
+        names = names.filter(code => /^9/.test(code));
+      }
+    }
     if (!names.length) {
       toast('目前沒有班級課程或教師資料可匯出。', 'warning');
       return;

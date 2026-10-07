@@ -11,6 +11,8 @@ let seasonalActiveSessionId = '';
 let seasonalInitialized = false;
 let seasonalSaveTail = Promise.resolve();
 let seasonalDraggingScheduleId = '';
+let seasonalSelectedSlots = new Map();
+let seasonalMultiSelectMode = false;
 
 function seasonalText(value) {
   return String(value == null ? '' : value).trim();
@@ -364,14 +366,56 @@ function seasonalFillSubjectOptions() {
   if (list) list.innerHTML = [...values].sort((a, b) => a.localeCompare(b, 'zh-Hant')).map(value => '<option value="' + esc(value) + '"></option>').join('');
 }
 
+
+function seasonalIsGrade9Class(row) {
+  if (!row) return false;
+  const grade = seasonalText(row['年級']);
+  const code = seasonalText(row['班級代碼']);
+  if (['9', '九', '9年級', '九年級'].includes(grade)) return true;
+  if (/^9\d+/.test(code) || code.startsWith('9')) return true;
+  return false;
+}
+
+function seasonalGetGrade9Classes() {
+  return (state.classes || []).filter(row =>
+    String(row['是否虛擬班'] || '').toUpperCase() !== 'TRUE' &&
+    seasonalIsGrade9Class(row)
+  );
+}
+
 function seasonalPopulateClassSelects() {
-  const classes = (state.classes || []).filter(row => String(row['是否虛擬班'] || '').toUpperCase() !== 'TRUE');
-  const options = classes.map(row => {
-    const code = seasonalText(row['班級代碼']);
-    return '<option value="' + esc(code) + '">' + esc(code + (row['班級名稱'] ? ' ' + row['班級名稱'] : '')) + '</option>';
-  }).join('');
+  const classes = seasonalGetGrade9Classes();
+  const container = document.getElementById('seasonal-need-classes-container');
+  if (container) {
+    if (!classes.length) {
+      container.innerHTML = '<span class="text-muted" style="font-size:12px;">查無九年級班級資料</span>';
+    } else {
+      container.innerHTML = classes.map(row => {
+        const code = seasonalText(row['班級代碼']);
+        const name = row['班級名稱'] ? ' ' + row['班級名稱'] : '';
+        return '<label class="seasonal-class-chip"><input type="checkbox" name="seasonal-need-class-check" value="' + esc(code) + '"><span>' + esc(code + name) + '</span></label>';
+      }).join('');
+      container.querySelectorAll('input[name="seasonal-need-class-check"]').forEach(input => {
+        input.addEventListener('change', () => {
+          input.closest('.seasonal-class-chip')?.classList.toggle('is-selected', input.checked);
+        });
+      });
+    }
+  }
   const needSelect = document.getElementById('seasonal-need-class');
-  if (needSelect) needSelect.innerHTML = options;
+  if (needSelect) {
+    needSelect.innerHTML = classes.map(row => {
+      const code = seasonalText(row['班級代碼']);
+      return '<option value="' + esc(code) + '">' + esc(code + (row['班級名稱'] ? ' ' + row['班級名稱'] : '')) + '</option>';
+    }).join('');
+  }
+}
+
+function seasonalToggleAllNeedClasses(checkAll) {
+  document.querySelectorAll('#seasonal-need-classes-container input[name="seasonal-need-class-check"]').forEach(cb => {
+    cb.checked = !!checkAll;
+    cb.closest('.seasonal-class-chip')?.classList.toggle('is-selected', !!checkAll);
+  });
 }
 
 function seasonalPopulateViewSelect() {
@@ -380,8 +424,12 @@ function seasonalPopulateViewSelect() {
   if (!select) return;
   const previous = select.value;
   if (mode === 'class') {
-    select.innerHTML = (state.classes || []).filter(row => String(row['是否虛擬班'] || '').toUpperCase() !== 'TRUE')
-      .map(row => '<option value="' + esc(seasonalText(row['班級代碼'])) + '">' + esc(seasonalText(row['班級代碼'])) + '</option>').join('');
+    select.innerHTML = seasonalGetGrade9Classes()
+      .map(row => {
+        const code = seasonalText(row['班級代碼']);
+        const name = row['班級名稱'] ? ' ' + row['班級名稱'] : '';
+        return '<option value="' + esc(code) + '">' + esc(code + name) + '</option>';
+      }).join('');
   } else {
     const teacherCodes = new Set([
       ...(state.teachers || []).map(row => seasonalText(row['教師姓名'] || row['姓名'])),
@@ -627,20 +675,30 @@ async function addSeasonalNeed() {
     toast('請先儲存活動名稱與日期。', 'warning');
     return;
   }
-  const classCode = seasonalText(document.getElementById('seasonal-need-class').value);
+  const checkedBoxes = Array.from(document.querySelectorAll('#seasonal-need-classes-container input[name="seasonal-need-class-check"]:checked'));
+  let selectedClasses = checkedBoxes.map(cb => seasonalText(cb.value)).filter(Boolean);
+  if (!selectedClasses.length) {
+    const fallback = seasonalText(document.getElementById('seasonal-need-class')?.value);
+    if (fallback) selectedClasses = [fallback];
+  }
+  if (!selectedClasses.length) {
+    toast('請先勾選至少一個班級。', 'warning');
+    return;
+  }
   const subject = seasonalText(document.getElementById('seasonal-need-subject').value);
   const teacher = seasonalText(document.getElementById('seasonal-need-teacher').value);
   const count = parseInt(document.getElementById('seasonal-need-count').value, 10);
   const startWeek = Number(document.getElementById('seasonal-need-week-start').value) || 1;
   const endWeek = Number(document.getElementById('seasonal-need-week-end').value) || startWeek;
-  if (!classCode || !subject || !teacher || !Number.isInteger(count) || count < 1 || endWeek < startWeek) {
-    toast('請填妥班級、科目、教師、正整數節數及有效週別。', 'warning');
+  if (!subject || !teacher || !Number.isInteger(count) || count < 1 || endWeek < startWeek) {
+    toast('請填妥科目、教師、正整數節數及有效週別。', 'warning');
     return;
   }
-  state.seasonalNeeds = [...(state.seasonalNeeds || []), {
+  const newNeeds = selectedClasses.map(classCode => ({
     '需求ID': seasonalNewId('NEED'), '場次ID': seasonalActiveSessionId, '班級代碼': classCode,
     '科目代碼': subject, '教師姓名': teacher, '本期節數': String(count), '起始週': String(startWeek), '結束週': String(endWeek)
-  }];
+  }));
+  state.seasonalNeeds = [...(state.seasonalNeeds || []), ...newNeeds];
   document.getElementById('seasonal-need-subject').value = '';
   document.getElementById('seasonal-need-count').value = '1';
   seasonalRenderNeeds();
@@ -649,6 +707,7 @@ async function addSeasonalNeed() {
   seasonalPopulateViewSelect();
   await seasonalPersistActive();
   renderSeasonalTimetable();
+  toast('已成功為 ' + selectedClasses.length + ' 個班級新增課程需求。', 'success');
 }
 
 function seasonalRenderTeacherBlocks() {
@@ -720,6 +779,193 @@ function seasonalFindNeedForManual(classCode, date, period, subject, teacherCode
   return match ? seasonalText(match['需求ID']) : '';
 }
 
+
+function toggleSeasonalMultiSelectMode(enabled) {
+  seasonalMultiSelectMode = !!enabled;
+  const chk = document.getElementById('seasonal-multi-select-mode');
+  if (chk) chk.checked = seasonalMultiSelectMode;
+  const label = document.getElementById('seasonal-multi-select-label');
+  if (label) {
+    label.style.borderColor = seasonalMultiSelectMode ? 'var(--accent, #2563eb)' : 'var(--border)';
+    label.style.background = seasonalMultiSelectMode ? 'var(--accent-light, #dbeafe)' : 'var(--surface)';
+    label.style.color = seasonalMultiSelectMode ? 'var(--accent-dark, #1d4ed8)' : 'inherit';
+    label.style.fontWeight = seasonalMultiSelectMode ? '700' : 'normal';
+  }
+  if (!seasonalMultiSelectMode) {
+    clearSeasonalSelectedSlots();
+  }
+}
+
+function clearSeasonalSelectedSlots() {
+  seasonalSelectedSlots.clear();
+  updateSeasonalSelectionUI();
+}
+
+function updateSeasonalSelectionUI() {
+  const count = seasonalSelectedSlots.size;
+  const bar = document.getElementById('seasonal-batch-bar');
+  const countEl = document.getElementById('seasonal-batch-count');
+  if (bar && countEl) {
+    countEl.textContent = String(count);
+    bar.style.display = count > 0 ? 'flex' : 'none';
+  }
+  document.querySelectorAll('.seasonal-slot-button').forEach(btn => {
+    const key = seasonalSlotKey(btn.dataset.class, btn.dataset.date, btn.dataset.period);
+    btn.classList.toggle('is-selected-slot', seasonalSelectedSlots.has(key));
+  });
+}
+
+function openSeasonalBatchAssignModal() {
+  if (!seasonalSelectedSlots.size) {
+    toast('請先在課表中選取至少一個格位。', 'warning');
+    return;
+  }
+  const count = seasonalSelectedSlots.size;
+  const slots = Array.from(seasonalSelectedSlots.values());
+  const allPeriod1 = slots.every(s => s.period === 1);
+  
+  document.getElementById('seasonal-batch-assign-title').textContent = '批次安排課程與教師（已選 ' + count + ' 格）';
+  
+  const subjectInput = document.getElementById('seasonal-batch-subject');
+  if (subjectInput && !subjectInput.value) {
+    subjectInput.value = allPeriod1 ? '學習輔導' : '';
+  }
+  
+  const datesSummary = [...new Set(slots.map(s => seasonalDisplayDate(s.date)))].slice(0, 5).join('、');
+  const extraDates = new Set(slots.map(s => s.date)).size > 5 ? '…等' : '';
+  document.getElementById('seasonal-batch-assign-hint').textContent = '即將為 ' + datesSummary + extraDates + ' 共 ' + count + ' 個時段排入課程。';
+  document.getElementById('seasonal-batch-assign-modal').classList.add('show');
+}
+
+function closeSeasonalBatchAssignModal() {
+  document.getElementById('seasonal-batch-assign-modal')?.classList.remove('show');
+}
+
+async function saveSeasonalBatchAssign() {
+  const subject = seasonalText(document.getElementById('seasonal-batch-subject').value);
+  const teacher = seasonalText(document.getElementById('seasonal-batch-teacher').value);
+  const lock = document.getElementById('seasonal-batch-lock').checked;
+  const overwrite = document.getElementById('seasonal-batch-overwrite').checked;
+  
+  if (!subject && !teacher) {
+    toast('請至少輸入科目／活動名稱或教師姓名。', 'warning');
+    return;
+  }
+  
+  const slots = Array.from(seasonalSelectedSlots.values());
+  let currentSchedule = [...(state.seasonalSchedule || [])];
+  const teacherBlocks = seasonalActiveRows('seasonalTeacherBlocks');
+  
+  // 檢查教師停排
+  if (teacher) {
+    for (const slot of slots) {
+      if (seasonalTeacherBlocked(teacher, slot.date, teacherBlocks)) {
+        toast(teacher + ' 老師在 ' + seasonalDisplayDate(slot.date) + ' 為停排期間！', 'warning');
+        return;
+      }
+    }
+    
+    // 檢查同一教師在同一 (date, period) 是否重複指派（不同班級）
+    const teacherSlots = new Set();
+    for (const slot of slots) {
+      const slotTeacherKey = seasonalTeacherSlotKey(teacher, slot.date, slot.period);
+      if (teacherSlots.has(slotTeacherKey)) {
+        toast('選取的格位中包含相同日期與節次，' + teacher + ' 老師無法同時出現在多個班級！', 'error');
+        return;
+      }
+      teacherSlots.add(slotTeacherKey);
+      
+      // 也檢查已有課表（非此班級）是否已衝堂
+      const existingOtherClass = currentSchedule.find(row =>
+        seasonalText(row['場次ID']) === seasonalActiveSessionId &&
+        seasonalText(row['班級代碼']) !== slot.classCode &&
+        seasonalIso(row['日期']) === slot.date &&
+        Number(row['節次']) === slot.period &&
+        seasonalText(row['教師姓名']) === teacher
+      );
+      if (existingOtherClass) {
+        toast(teacher + ' 老師在 ' + seasonalDisplayDate(slot.date) + ' 第' + slot.period + '節已有 ' + existingOtherClass['班級代碼'] + ' 的課程！', 'error');
+        return;
+      }
+    }
+  }
+  
+  let appliedCount = 0;
+  for (const slot of slots) {
+    const existingIdx = currentSchedule.findIndex(row =>
+      seasonalText(row['場次ID']) === seasonalActiveSessionId &&
+      seasonalText(row['班級代碼']) === slot.classCode &&
+      seasonalIso(row['日期']) === slot.date &&
+      Number(row['節次']) === slot.period
+    );
+    
+    if (existingIdx !== -1) {
+      if (!overwrite) continue;
+      const existing = currentSchedule[existingIdx];
+      const finalSubject = subject || existing['科目代碼'];
+      const finalTeacher = teacher !== '' ? teacher : existing['教師姓名'];
+      const finalLock = lock ? 'TRUE' : existing['是否鎖定'];
+      currentSchedule[existingIdx] = {
+        ...existing,
+        '科目代碼': finalSubject,
+        '教師姓名': finalTeacher,
+        '是否鎖定': finalLock,
+        '手動安排': 'TRUE',
+        '需求ID': seasonalFindNeedForManual(slot.classCode, slot.date, slot.period, finalSubject, finalTeacher, existing['課表ID'])
+      };
+      appliedCount++;
+    } else {
+      const finalSubject = subject || (slot.period === 1 ? '學習輔導' : '未定');
+      const finalTeacher = teacher || '';
+      const newRow = {
+        '課表ID': seasonalNewId('MANUAL'),
+        '場次ID': seasonalActiveSessionId,
+        '班級代碼': slot.classCode,
+        '日期': slot.date,
+        '節次': String(slot.period),
+        '科目代碼': finalSubject,
+        '教師姓名': finalTeacher,
+        '是否鎖定': lock ? 'TRUE' : 'FALSE',
+        '手動安排': 'TRUE',
+        '需求ID': seasonalFindNeedForManual(slot.classCode, slot.date, slot.period, finalSubject, finalTeacher, '')
+      };
+      currentSchedule.push(newRow);
+      appliedCount++;
+    }
+  }
+  
+  state.seasonalSchedule = currentSchedule;
+  closeSeasonalBatchAssignModal();
+  clearSeasonalSelectedSlots();
+  renderSeasonalTimetable();
+  
+  if (await seasonalPersistActive()) {
+    toast('已成功批次排入 ' + appliedCount + ' 格課程。', 'success');
+  }
+}
+
+async function batchClearSeasonalSelectedSlots() {
+  if (!seasonalSelectedSlots.size) return;
+  const count = seasonalSelectedSlots.size;
+  const confirmed = await showModal('批次清除課程', '確定要清空已選取的 ' + count + ' 個格位嗎？', 'confirm', '確定清除', '取消');
+  if (!confirmed) return;
+  
+  const slots = Array.from(seasonalSelectedSlots.values());
+  const slotKeys = new Set(slots.map(s => seasonalSlotKey(s.classCode, s.date, s.period)));
+  
+  state.seasonalSchedule = (state.seasonalSchedule || []).filter(row => {
+    if (seasonalText(row['場次ID']) !== seasonalActiveSessionId) return true;
+    const key = seasonalSlotKey(row['班級代碼'], row['日期'], row['節次']);
+    return !slotKeys.has(key);
+  });
+  
+  clearSeasonalSelectedSlots();
+  renderSeasonalTimetable();
+  if (await seasonalPersistActive()) {
+    toast('已清除 ' + count + ' 格課程。', 'success');
+  }
+}
+
 function renderSeasonalTimetable() {
   const wrap = document.getElementById('seasonal-timetable');
   if (!wrap || !seasonalActiveSession()) return;
@@ -750,7 +996,31 @@ function renderSeasonalTimetable() {
     }).join('');
     wrap.innerHTML = '<table class="seasonal-timetable-table">' + head + '<tbody>' + rows + '</tbody></table>';
     wrap.querySelectorAll('.seasonal-slot-button').forEach(button => {
-      button.addEventListener('click', () => openSeasonalAssignModal(button.dataset.class, button.dataset.date, Number(button.dataset.period)));
+      button.addEventListener('click', (event) => {
+        const isMulti = seasonalMultiSelectMode || event.ctrlKey || event.metaKey || event.shiftKey;
+        const key = seasonalSlotKey(button.dataset.class, button.dataset.date, button.dataset.period);
+        if (isMulti) {
+          if (seasonalSelectedSlots.has(key)) {
+            seasonalSelectedSlots.delete(key);
+          } else {
+            seasonalSelectedSlots.set(key, {
+              classCode: button.dataset.class,
+              date: button.dataset.date,
+              period: Number(button.dataset.period),
+              id: button.dataset.id
+            });
+          }
+          updateSeasonalSelectionUI();
+        } else {
+          if (seasonalSelectedSlots.size > 1 && seasonalSelectedSlots.has(key)) {
+            openSeasonalBatchAssignModal();
+            return;
+          }
+          seasonalSelectedSlots.clear();
+          updateSeasonalSelectionUI();
+          openSeasonalAssignModal(button.dataset.class, button.dataset.date, Number(button.dataset.period));
+        }
+      });
       button.addEventListener('dragstart', event => {
         if (!button.dataset.id) { event.preventDefault(); return; }
         seasonalDraggingScheduleId = button.dataset.id;
@@ -768,6 +1038,7 @@ function renderSeasonalTimetable() {
       });
       button.addEventListener('dragend', () => { seasonalDraggingScheduleId = ''; });
     });
+    updateSeasonalSelectionUI();
   } else {
     const rows = days.map(date => {
       const week = seasonalWeekNo(date, session['開始日期']);

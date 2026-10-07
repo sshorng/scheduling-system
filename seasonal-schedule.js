@@ -92,6 +92,20 @@ function seasonalTeacherBlocked(teacherCode, date, period, blocks) {
     seasonalIso(block['日期']) === target && Number(block['節次']) === slot);
 }
 
+function seasonalCourseChip(subject, classCode) {
+  const text = seasonalText(subject);
+  let color = { bg: '#f1f5f9', text: '#475569' };
+  try {
+    const resolved = typeof getScheduleCellColor === 'function'
+      ? getScheduleCellColor(text, classCode)
+      : (typeof getSubjectColor === 'function' ? getSubjectColor(text) : null);
+    if (resolved && resolved.bg && resolved.text) color = resolved;
+  } catch (error) {
+    color = { bg: '#f1f5f9', text: '#475569' };
+  }
+  return '<span class="cell-chip" title="' + esc(text) + '" style="background:' + color.bg + ';color:' + color.text + ';">' + esc(text) + '</span>';
+}
+
 function seasonalCountNeedLessons(need, rows) {
   const id = seasonalText(need['需求ID']);
   const classCode = seasonalText(need['班級代碼']);
@@ -1061,7 +1075,7 @@ function renderSeasonalTimetable() {
       const cells = [ '<td class="seasonal-date-cell"><b>' + esc(seasonalDisplayDate(date)) + '</b><small>第' + week + '週</small></td>' ];
       for (let period = 1; period <= 5; period++) {
         const item = seasonalGetScheduleCell(person, date, period);
-        const text = item ? esc(item['科目代碼']) + (item['教師姓名'] ? '<small>' + esc(item['教師姓名']) + '</small>' : '') : '<span class="seasonal-add-mark">＋</span>';
+        const text = item ? seasonalCourseChip(item['科目代碼'], person) + (item['教師姓名'] ? '<small>' + esc(item['教師姓名']) + '</small>' : '') : '<span class="seasonal-add-mark">＋</span>';
         const canDrag = item && !seasonalIsTrue(item['是否鎖定']) && !seasonalMultiSelectMode;
         cells.push('<td><button class="seasonal-slot-button ' + (period === 1 ? 'is-manual-period ' : '') + (item ? 'has-course' : '') + '" type="button" draggable="' + (canDrag ? 'true' : 'false') + '" data-id="' + esc(item ? item['課表ID'] : '') + '" data-class="' + esc(person) + '" data-date="' + esc(date) + '" data-period="' + period + '">' + text + '</button></td>');
       }

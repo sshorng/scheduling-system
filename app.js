@@ -1901,6 +1901,9 @@ function applyData(d) {
     }
   });
   buildIndex();
+  if (typeof renderSeasonalWorkspace === 'function' && typeof seasonalActiveSession === 'function') {
+    try { renderSeasonalWorkspace(); } catch (err) { console.warn('renderSeasonalWorkspace on loadAll error:', err); }
+  }
 }
 
 function parseSubjectMaxConsecutiveDays(subject) {

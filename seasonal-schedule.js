@@ -371,16 +371,19 @@ function seasonalIsGrade9Class(row) {
   if (!row) return false;
   const grade = seasonalText(row['年級']);
   const code = seasonalText(row['班級代碼']);
-  if (['9', '九', '9年級', '九年級'].includes(grade)) return true;
-  if (/^9\d+/.test(code) || code.startsWith('9')) return true;
+  const name = seasonalText(row['班級名稱']);
+  if (['9', '九', '9年級', '九年級', '國三', '國九', '三年級', '3年級'].includes(grade)) return true;
+  if (/^9\d+/.test(code) || code.startsWith('9') || code.startsWith('九')) return true;
+  if (name.includes('九') || name.includes('9年級') || name.includes('九年級')) return true;
   return false;
 }
 
 function seasonalGetGrade9Classes() {
-  return (state.classes || []).filter(row =>
-    String(row['是否虛擬班'] || '').toUpperCase() !== 'TRUE' &&
-    seasonalIsGrade9Class(row)
+  const allClasses = (state.classes || []).filter(row =>
+    String(row['是否虛擬班'] || '').toUpperCase() !== 'TRUE'
   );
+  const grade9 = allClasses.filter(seasonalIsGrade9Class);
+  return grade9.length > 0 ? grade9 : allClasses;
 }
 
 function seasonalPopulateClassSelects() {
@@ -424,12 +427,18 @@ function seasonalPopulateViewSelect() {
   if (!select) return;
   const previous = select.value;
   if (mode === 'class') {
-    select.innerHTML = seasonalGetGrade9Classes()
+    const classes = seasonalGetGrade9Classes();
+    select.innerHTML = classes
       .map(row => {
         const code = seasonalText(row['班級代碼']);
         const name = row['班級名稱'] ? ' ' + row['班級名稱'] : '';
         return '<option value="' + esc(code) + '">' + esc(code + name) + '</option>';
       }).join('');
+    if (classes.length > 0 && (!previous || !classes.some(c => seasonalText(c['班級代碼']) === previous))) {
+      select.value = seasonalText(classes[0]['班級代碼']);
+    } else if (classes.some(c => seasonalText(c['班級代碼']) === previous)) {
+      select.value = previous;
+    }
   } else {
     const teacherCodes = new Set([
       ...(state.teachers || []).map(row => seasonalText(row['教師姓名'] || row['姓名'])),
@@ -438,8 +447,8 @@ function seasonalPopulateViewSelect() {
     ].filter(Boolean));
     select.innerHTML = [...teacherCodes].sort((a, b) => a.localeCompare(b, 'zh-Hant'))
       .map(code => '<option value="' + esc(code) + '">' + esc(code) + '</option>').join('');
+    if ([...select.options].some(option => option.value === previous)) select.value = previous;
   }
-  if ([...select.options].some(option => option.value === previous)) select.value = previous;
 }
 
 function renderSeasonalWorkspace() {
@@ -1071,11 +1080,14 @@ function renderSeasonalTimetable() {
       return '<tr>' + cells.join('') + '</tr>';
     }).join('');
     wrap.innerHTML = '<table class="seasonal-timetable-table">' + head + '<tbody>' + rows + '</tbody></table>';
-    wrap.querySelectorAll('.seasonal-slot-button').forEach(button => {
+        wrap.querySelectorAll('.seasonal-slot-button').forEach(button => {
       button.addEventListener('click', (event) => {
-        const isMulti = seasonalMultiSelectMode || event.ctrlKey || event.metaKey || event.shiftKey;
+        const chk = document.getElementById('seasonal-multi-select-mode');
+        const isMulti = (chk && chk.checked) || seasonalMultiSelectMode || event.ctrlKey || event.metaKey || event.shiftKey;
         const key = seasonalSlotKey(button.dataset.class, button.dataset.date, button.dataset.period);
         if (isMulti) {
+          event.preventDefault();
+          event.stopPropagation();
           if (seasonalSelectedSlots.has(key)) {
             seasonalSelectedSlots.delete(key);
           } else {
@@ -1087,15 +1099,15 @@ function renderSeasonalTimetable() {
             });
           }
           updateSeasonalSelectionUI();
-        } else {
-          if (seasonalSelectedSlots.size > 1 && seasonalSelectedSlots.has(key)) {
-            openSeasonalBatchAssignModal();
-            return;
-          }
-          seasonalSelectedSlots.clear();
-          updateSeasonalSelectionUI();
-          openSeasonalAssignModal(button.dataset.class, button.dataset.date, Number(button.dataset.period));
+          return;
         }
+        if (seasonalSelectedSlots.size > 1 && seasonalSelectedSlots.has(key)) {
+          openSeasonalBatchAssignModal();
+          return;
+        }
+        seasonalSelectedSlots.clear();
+        updateSeasonalSelectionUI();
+        openSeasonalAssignModal(button.dataset.class, button.dataset.date, Number(button.dataset.period));
       });
       button.addEventListener('dragstart', event => {
         if (!button.dataset.id) { event.preventDefault(); return; }

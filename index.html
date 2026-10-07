@@ -990,6 +990,45 @@
       <button class="btn btn-primary" type="button" onclick="saveSeasonalBatchAssign()">確定批次排入</button>
     </div>
   </div>
+
+<!-- 寒暑輔編輯需求 Modal -->
+<div class="modal-overlay" id="seasonal-edit-need-modal">
+  <div class="modal-card seasonal-assign-modal-card">
+    <div class="modal-title">編輯課程需求</div>
+    <input id="seasonal-edit-need-id" type="hidden">
+    <div class="form-group" style="margin-top:10px;">
+      <label for="seasonal-edit-need-class">班級</label>
+      <select id="seasonal-edit-need-class"></select>
+    </div>
+    <div class="form-group">
+      <label for="seasonal-edit-need-subject">科目</label>
+      <input id="seasonal-edit-need-subject" type="text" list="seasonal-subject-options" placeholder="例：生物">
+    </div>
+    <div class="form-group">
+      <label for="seasonal-edit-need-teacher">教師</label>
+      <input id="seasonal-edit-need-teacher" type="text" list="seasonal-teacher-options" placeholder="選擇或輸入教師">
+    </div>
+    <div class="form-group">
+      <label for="seasonal-edit-need-count">本期節數</label>
+      <input id="seasonal-edit-need-count" type="number" min="1" step="1" value="1">
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+      <div class="form-group">
+        <label for="seasonal-edit-need-week-start">起始週</label>
+        <select id="seasonal-edit-need-week-start"></select>
+      </div>
+      <div class="form-group">
+        <label for="seasonal-edit-need-week-end">結束週</label>
+        <select id="seasonal-edit-need-week-end"></select>
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn btn-ghost" type="button" onclick="closeSeasonalEditNeedModal()">取消</button>
+      <button class="btn btn-primary" type="button" onclick="saveSeasonalEditNeed()">儲存修改</button>
+    </div>
+  </div>
+</div>
+
 </div>
 
 <!-- ===== 設定 Modal（GAS URL）===== -->

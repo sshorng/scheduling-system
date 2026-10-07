@@ -345,7 +345,7 @@ function seasonalFillWeekSelect(id, selectedValue) {
 }
 
 function seasonalUpdateWeekSelects() {
-  ['seasonal-need-week-start', 'seasonal-need-week-end', 'seasonal-block-week-start', 'seasonal-block-week-end'].forEach(id => seasonalFillWeekSelect(id));
+  ['seasonal-need-week-start', 'seasonal-need-week-end', 'seasonal-block-week-start', 'seasonal-block-week-end', 'seasonal-edit-need-week-start', 'seasonal-edit-need-week-end'].forEach(id => seasonalFillWeekSelect(id));
 }
 
 function seasonalFillTeacherOptions() {
@@ -651,14 +651,90 @@ async function saveSeasonalSetup() {
   }
 }
 
+
+function openSeasonalEditNeedModal(needId) {
+  const need = (state.seasonalNeeds || []).find(row => seasonalText(row['需求ID']) === seasonalText(needId));
+  if (!need) return;
+  document.getElementById('seasonal-edit-need-id').value = needId;
+  const classSelect = document.getElementById('seasonal-edit-need-class');
+  if (classSelect) {
+    const classes = seasonalGetGrade9Classes();
+    classSelect.innerHTML = classes.map(row => {
+      const code = seasonalText(row['班級代碼']);
+      const name = row['班級名稱'] ? ' ' + row['班級名稱'] : '';
+      return '<option value="' + esc(code) + '">' + esc(code + name) + '</option>';
+    }).join('');
+    classSelect.value = seasonalText(need['班級代碼']);
+  }
+  document.getElementById('seasonal-edit-need-subject').value = need['科目代碼'] || '';
+  document.getElementById('seasonal-edit-need-teacher').value = need['教師姓名'] || '';
+  document.getElementById('seasonal-edit-need-count').value = need['本期節數'] || '1';
+  seasonalFillWeekSelect('seasonal-edit-need-week-start');
+  seasonalFillWeekSelect('seasonal-edit-need-week-end');
+  document.getElementById('seasonal-edit-need-week-start').value = String(need['起始週'] || '1');
+  document.getElementById('seasonal-edit-need-week-end').value = String(need['結束週'] || need['起始週'] || '1');
+  document.getElementById('seasonal-edit-need-modal')?.classList.add('show');
+}
+
+function closeSeasonalEditNeedModal() {
+  document.getElementById('seasonal-edit-need-modal')?.classList.remove('show');
+}
+
+async function saveSeasonalEditNeed() {
+  const needId = seasonalText(document.getElementById('seasonal-edit-need-id').value);
+  const need = (state.seasonalNeeds || []).find(row => seasonalText(row['需求ID']) === needId);
+  if (!need) return;
+  const classCode = seasonalText(document.getElementById('seasonal-edit-need-class').value);
+  const subject = seasonalText(document.getElementById('seasonal-edit-need-subject').value);
+  const teacher = seasonalText(document.getElementById('seasonal-edit-need-teacher').value);
+  const count = parseInt(document.getElementById('seasonal-edit-need-count').value, 10);
+  const startWeek = Number(document.getElementById('seasonal-edit-need-week-start').value) || 1;
+  const endWeek = Number(document.getElementById('seasonal-edit-need-week-end').value) || startWeek;
+  if (!classCode || !subject || !teacher || !Number.isInteger(count) || count < 1 || endWeek < startWeek) {
+    toast('請填妥班級、科目、教師、正整數節數及有效週別。', 'warning');
+    return;
+  }
+  need['班級代碼'] = classCode;
+  need['科目代碼'] = subject;
+  need['教師姓名'] = teacher;
+  need['本期節數'] = String(count);
+  need['起始週'] = String(startWeek);
+  need['結束週'] = String(endWeek);
+  
+  if (Array.isArray(state.seasonalSchedule)) {
+    state.seasonalSchedule.forEach(row => {
+      if (seasonalText(row['需求ID']) === needId && seasonalText(row['場次ID']) === seasonalActiveSessionId) {
+        row['班級代碼'] = classCode;
+        row['科目代碼'] = subject;
+        row['教師姓名'] = teacher;
+      }
+    });
+  }
+  
+  closeSeasonalEditNeedModal();
+  seasonalRenderNeeds();
+  seasonalFillTeacherOptions();
+  seasonalFillSubjectOptions();
+  seasonalPopulateViewSelect();
+  await seasonalPersistActive();
+  renderSeasonalTimetable();
+  toast('課程需求已更新。', 'success');
+}
+
 function seasonalRenderNeeds() {
   const body = document.getElementById('seasonal-needs-body');
   if (!body) return;
   const rows = seasonalActiveRows('seasonalNeeds');
   body.innerHTML = rows.length ? rows.map(row => '<tr><td>' + esc(row['班級代碼']) + '</td><td>' + esc(row['科目代碼']) + '</td><td>' + esc(row['教師姓名']) +
     '</td><td>' + esc(row['本期節數']) + '</td><td>' + esc(seasonalWeekLabel(row['起始週'])) + '～' + esc(seasonalWeekLabel(row['結束週'])) +
-    '</td><td><button class="btn btn-ghost btn-xs" data-delete-need="' + esc(row['需求ID']) + '" type="button">刪除</button></td></tr>').join('') :
+    '</td><td><div style="display:flex;gap:4px;justify-content:center;">' +
+    '<button class="btn btn-primary btn-xs" data-edit-need="' + esc(row['需求ID']) + '" type="button">編輯</button>' +
+    '<button class="btn btn-ghost btn-xs text-danger" data-delete-need="' + esc(row['需求ID']) + '" type="button">刪除</button>' +
+    '</div></td></tr>').join('') :
     '<tr><td colspan="6" class="text-center text-muted">尚未設定課程需求</td></tr>';
+  body.querySelectorAll('[data-edit-need]').forEach(button => button.addEventListener('click', () => {
+    openSeasonalEditNeedModal(button.dataset.editNeed);
+  }));
   body.querySelectorAll('[data-delete-need]').forEach(button => button.addEventListener('click', async () => {
     const id = button.dataset.deleteNeed;
     state.seasonalNeeds = (state.seasonalNeeds || []).filter(row => seasonalText(row['需求ID']) !== id);

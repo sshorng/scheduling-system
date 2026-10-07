@@ -7413,7 +7413,74 @@ function getDemoData() {
 // ============================================================
 // 初始化入口
 // ============================================================
+
+// ============================================================
+// 登入驗證
+// ============================================================
+async function submitLogin() {
+  const pwd = document.getElementById('login-password').value.trim();
+  const errEl = document.getElementById('login-error');
+  const btn   = document.getElementById('login-btn');
+  if (!pwd) { errEl.textContent = '請輸入密碼'; return; }
+  btn.disabled = true;
+  btn.textContent = '驗證中\u2026';
+  errEl.textContent = '';
+  try {
+    const fd = new FormData();
+    fd.append('action', 'verifyAdmin');
+    fd.append('data', JSON.stringify({ password: pwd }));
+    const res  = await fetch(GAS_URL, { method: 'POST', body: fd });
+    const json = await res.json();
+    if (json && json.ok) {
+      sessionStorage.setItem('sch_auth', '1');
+      document.getElementById('login-overlay').classList.add('hidden');
+    } else {
+      errEl.textContent = (json && json.error) || '密碼錯誤，請重試';
+    }
+  } catch (e) {
+    errEl.textContent = '無法連線，請確認 GAS 網址';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '進入系統';
+  }
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
+  // ── 密碼驗證守門 ──
+  if (GAS_URL) {
+    const _authed = sessionStorage.getItem('sch_auth');
+    if (!_authed) {
+      try {
+        const _fd = new FormData();
+        _fd.append('action', 'verifyAdmin');
+        _fd.append('data', JSON.stringify({ password: '' }));
+        const _r = await fetch(GAS_URL, { method: 'POST', body: _fd });
+        const _j = await _r.json();
+        if (_j && _j.error === '\u672a\u8a2d\u5b9a\u7ba1\u7406\u54e1\u5bc6\u78bc') {
+          // 試算表未設密碼 → 直接放行
+          document.getElementById('login-overlay').classList.add('hidden');
+        } else {
+          // 等使用者在登入遮罩輸入正確密碼
+          await new Promise(function(resolve) {
+            var overlay = document.getElementById('login-overlay');
+            var obs = new MutationObserver(function() {
+              if (overlay.classList.contains('hidden')) { obs.disconnect(); resolve(); }
+            });
+            obs.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+          });
+        }
+      } catch(e) {
+        // 連線失敗暫不阻擋，放行後由 loadAll 顯示錯誤
+        document.getElementById('login-overlay').classList.add('hidden');
+      }
+    } else {
+      document.getElementById('login-overlay').classList.add('hidden');
+    }
+  } else {
+    // 未設定 GAS URL → 直接放行（後續設定彈窗會出現）
+    document.getElementById('login-overlay').classList.add('hidden');
+  }
+
   restoreUIState();
   initTabs();
   if (typeof initSeasonalModule === 'function') initSeasonalModule();

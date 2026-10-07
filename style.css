@@ -1770,3 +1770,42 @@
     max-height: calc(100vh - 300px);
   }
 }
+
+/* ===== 登入遮罩 ===== */
+#login-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+  display: flex; align-items: center; justify-content: center;
+}
+#login-overlay.hidden { display: none; }
+
+#login-card {
+  background: #fff; border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.25);
+  padding: 40px 36px 36px; width: 340px; text-align: center;
+}
+#login-logo { font-size: 40px; margin-bottom: 10px; }
+#login-title {
+  font-size: 22px; font-weight: 700; color: #1e293b; margin-bottom: 4px;
+}
+#login-subtitle {
+  font-size: 13px; color: #94a3b8; margin-bottom: 24px;
+}
+#login-form { display: flex; flex-direction: column; gap: 12px; }
+#login-password {
+  width: 100%; padding: 10px 14px; border: 1.5px solid #e2e8f0;
+  border-radius: 8px; font-size: 15px; outline: none;
+  transition: border-color .2s;
+}
+#login-password:focus { border-color: #2563eb; }
+#login-error {
+  min-height: 18px; font-size: 12px; color: #dc2626;
+  text-align: left; padding-left: 2px;
+}
+#login-btn {
+  width: 100%; padding: 10px; background: #2563eb; color: #fff;
+  border: none; border-radius: 8px; font-size: 15px; font-weight: 600;
+  cursor: pointer; transition: background .2s;
+}
+#login-btn:hover { background: #1d4ed8; }
+#login-btn:disabled { background: #93c5fd; cursor: not-allowed; }

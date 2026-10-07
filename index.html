@@ -16,6 +16,24 @@
 </head>
 <body>
 
+<!-- ===== 登入遮罩 ===== -->
+<div id="login-overlay">
+  <div id="login-card">
+    <div id="login-logo">📅</div>
+    <div id="login-title">排課系統</div>
+    <div id="login-subtitle">請輸入進入密碼</div>
+    <div id="login-form">
+      <input type="password" id="login-password" placeholder="密碼"
+        autocomplete="current-password"
+        onkeydown="if(event.key==='Enter') submitLogin()">
+      <div id="login-error"></div>
+      <button id="login-btn" onclick="submitLogin()">進入系統</button>
+    </div>
+  </div>
+</div>
+
+
+
 <!-- ===== Top Bar ===== -->
 <div id="topbar">
   <div id="brand">📅 排課系統</div>

@@ -42,8 +42,8 @@
     <button class="tab-btn" data-tab="config">📋 配課</button>
      <button class="tab-btn" data-tab="constraints">⛔ 限制</button>
       <button class="tab-btn" data-tab="stats">📊 統計</button>
-      <button class="tab-btn" data-tab="seasonal">🌞 寒暑輔</button>
       <button class="tab-btn" data-tab="room">🏫 教室</button>
+      <button class="tab-btn" data-tab="seasonal">🌞 寒暑輔</button>
   </div>
   <div id="topbar-right">
     <div id="status-dot" title="連線狀態"></div>
@@ -838,6 +838,8 @@
           <label for="seasonal-session-select">活動場次</label>
           <select id="seasonal-session-select" aria-label="選擇寒暑輔場次"></select>
           <button class="btn btn-primary btn-sm" type="button" onclick="createSeasonalSession()">＋ 新增場次</button>
+          <button class="btn btn-ghost btn-sm" type="button" onclick="seasonalSetAllSeasonalSectionsCollapsed(true)">全部收合</button>
+          <button class="btn btn-ghost btn-sm" type="button" onclick="seasonalSetAllSeasonalSectionsCollapsed(false)">全部展開</button>
           <button class="btn btn-ghost btn-sm" type="button" onclick="exportSeasonalWorkbook('class')">📥 班級版 Excel</button>
           <button class="btn btn-ghost btn-sm" type="button" onclick="exportSeasonalWorkbook('teacher')">📥 教師版 Excel</button>
         </div>
@@ -853,8 +855,12 @@
         <section class="panel-card">
           <div class="seasonal-section-heading">
             <div><span class="seasonal-step">1</span><strong>活動日期與節次</strong></div>
-            <span id="seasonal-session-status" class="seasonal-save-status">尚未儲存</span>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span id="seasonal-session-status" class="seasonal-save-status">尚未儲存</span>
+              <button class="btn btn-ghost btn-xs seasonal-section-toggle" type="button" data-seasonal-section-toggle="setup" aria-expanded="true" aria-controls="seasonal-setup-body" onclick="seasonalToggleSeasonalSection('setup')">收合</button>
+            </div>
           </div>
+          <div id="seasonal-setup-body" data-seasonal-section-body="setup">
           <div class="seasonal-session-fields">
             <div class="form-group"><label for="seasonal-name">活動名稱</label><input id="seasonal-name" type="text" placeholder="例：115 學年度暑假學藝活動"></div>
             <div class="form-group"><label for="seasonal-type">活動類型</label><select id="seasonal-type"><option value="暑輔">暑輔</option><option value="寒輔">寒輔</option></select></div>
@@ -871,11 +877,13 @@
           <div class="flex justify-end gap-2" style="margin-top:12px;">
             <button class="btn btn-primary" type="button" onclick="saveSeasonalSetup()">儲存活動設定</button>
           </div>
+          </div>
         </section>
 
         <div class="seasonal-config-grid">
           <section class="panel-card">
-            <div class="seasonal-section-heading"><div><span class="seasonal-step">2</span><strong>班級課程需求</strong></div></div>
+            <div class="seasonal-section-heading"><div><span class="seasonal-step">2</span><strong>班級課程需求</strong></div><button class="btn btn-ghost btn-xs seasonal-section-toggle" type="button" data-seasonal-section-toggle="needs" aria-expanded="true" aria-controls="seasonal-needs-section-body" onclick="seasonalToggleSeasonalSection('needs')">收合</button></div>
+            <div id="seasonal-needs-section-body" data-seasonal-section-body="needs">
             <div class="seasonal-form-grid">
               <div class="form-group seasonal-classes-picker-group" style="grid-column: 1 / -1;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
@@ -894,10 +902,12 @@
             </div>
             <div class="flex justify-end" style="margin:8px 0 12px;"><button class="btn btn-primary btn-sm" type="button" onclick="addSeasonalNeed()">＋ 新增需求</button></div>
             <div class="seasonal-table-scroll"><table class="data-table compact-table"><thead><tr><th>班級</th><th>科目</th><th>教師</th><th>節數</th><th></th></tr></thead><tbody id="seasonal-needs-body"></tbody></table></div>
+            </div>
           </section>
 
           <section class="panel-card">
-            <div class="seasonal-section-heading"><div><span class="seasonal-step">3</span><strong>教師停排</strong></div></div>
+            <div class="seasonal-section-heading"><div><span class="seasonal-step">3</span><strong>教師停排</strong></div><button class="btn btn-ghost btn-xs seasonal-section-toggle" type="button" data-seasonal-section-toggle="blocks" aria-expanded="true" aria-controls="seasonal-blocks-section-body" onclick="seasonalToggleSeasonalSection('blocks')">收合</button></div>
+            <div id="seasonal-blocks-section-body" data-seasonal-section-body="blocks">
             <div class="seasonal-form-grid seasonal-block-form">
               <div class="form-group"><label for="seasonal-block-teacher">教師</label><input id="seasonal-block-teacher" type="text" list="seasonal-teacher-options" placeholder="選擇或輸入教師"></div>
               <div class="form-group"><label for="seasonal-block-reason">原因</label><input id="seasonal-block-reason" type="text" placeholder="例：出國（套用到新設定）"></div>
@@ -905,12 +915,14 @@
             <div class="seasonal-days-heading" style="margin-top:12px;"><strong>停排時段</strong><span class="text-muted">選擇教師後，點選日期 × 節次格位即可設定或取消停排。</span></div>
             <div id="seasonal-block-grid" class="seasonal-timetable-scroll"></div>
             <div class="seasonal-table-scroll" style="margin-top:12px;"><table class="data-table compact-table"><thead><tr><th>教師</th><th>日期</th><th>節次</th><th>原因</th><th></th></tr></thead><tbody id="seasonal-blocks-body"></tbody></table></div>
+            </div>
           </section>
         </div>
 
         <section class="panel-card seasonal-timetable-card">
+          <div id="seasonal-timetable-body" data-seasonal-section-body="timetable">
           <div class="seasonal-timetable-toolbar">
-            <div><div class="seasonal-section-heading"><div><span class="seasonal-step">4</span><strong>日期課表</strong></div></div><p>點擊格位手動新增或修改，拖曳已有課程可移動；第一節永遠由你手動處理。</p></div>
+            <div><div class="seasonal-section-heading"><div><span class="seasonal-step">4</span><strong>日期課表</strong><button class="btn btn-ghost btn-xs seasonal-section-toggle" type="button" data-seasonal-section-toggle="timetable" aria-expanded="true" aria-controls="seasonal-timetable-body" onclick="seasonalToggleSeasonalSection('timetable')">收合</button></div></div><p>點擊格位手動新增或修改，拖曳已有課程可移動或對調；第一節永遠由你手動處理。</p></div>
             <div class="seasonal-view-controls">
               <label for="seasonal-view-mode">檢視</label>
               <select id="seasonal-view-mode" onchange="renderSeasonalTimetable()"><option value="class">班級課表</option><option value="teacher">教師課表</option></select>
@@ -936,6 +948,7 @@
           </div>
           <div id="seasonal-schedule-summary" class="seasonal-schedule-summary"></div>
           <div id="seasonal-timetable" class="seasonal-timetable-scroll"></div>
+          </div>
         </section>
       </div>
     </div>
@@ -987,6 +1000,7 @@
       <button class="btn btn-primary" type="button" onclick="saveSeasonalBatchAssign()">確定批次排入</button>
     </div>
   </div>
+</div>
 
 <!-- 寒暑輔編輯需求 Modal -->
 <div class="modal-overlay" id="seasonal-edit-need-modal">

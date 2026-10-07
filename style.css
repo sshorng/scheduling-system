@@ -87,6 +87,8 @@
     .seasonal-empty span { color: var(--ink-2); font-size: 13px; }
     .seasonal-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
     .seasonal-section-heading > div { display: flex; align-items: center; gap: 9px; }
+    .seasonal-section-toggle { white-space: nowrap; }
+    [data-seasonal-section-body][hidden] { display: none !important; }
     .seasonal-step { display: inline-flex; width: 25px; height: 25px; align-items: center; justify-content: center; border-radius: 50%; background: var(--accent-light); color: var(--accent); font-size: 12px; font-weight: 800; }
     .seasonal-save-status { color: var(--success); font-size: 11px; }
     .seasonal-save-status.is-error { color: var(--danger); }

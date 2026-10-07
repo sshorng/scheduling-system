@@ -83,12 +83,13 @@ function seasonalTeacherSlotKey(teacherCode, date, period) {
   return [seasonalText(teacherCode), seasonalIso(date), Number(period)].join('|');
 }
 
-function seasonalTeacherBlocked(teacherCode, date, blocks) {
+function seasonalTeacherBlocked(teacherCode, date, period, blocks) {
   const teacher = seasonalText(teacherCode);
   const target = seasonalIso(date);
-  if (!teacher || !target) return false;
+  const slot = Number(period);
+  if (!teacher || !target || !Number.isInteger(slot)) return false;
   return (blocks || []).some(block => seasonalText(block['教師姓名']) === teacher &&
-    seasonalIso(block['開始日期']) <= target && seasonalIso(block['結束日期']) >= target);
+    seasonalIso(block['日期']) === target && Number(block['節次']) === slot);
 }
 
 function seasonalCountNeedLessons(need, rows) {
@@ -96,14 +97,12 @@ function seasonalCountNeedLessons(need, rows) {
   const classCode = seasonalText(need['班級代碼']);
   const subject = seasonalText(need['科目代碼']);
   const teacher = seasonalText(need['教師姓名']);
-  const startWeek = Number(need['起始週']) || 1;
-  const endWeek = Number(need['結束週']) || startWeek;
   return (rows || []).filter(row => {
     if (Number(row['節次']) === 1) return false;
     if (id && seasonalText(row['需求ID']) === id) return true;
-    if (seasonalText(row['班級代碼']) !== classCode || seasonalText(row['科目代碼']) !== subject || seasonalText(row['教師姓名']) !== teacher) return false;
-    const week = Number(row['_週別']);
-    return week >= startWeek && week <= endWeek;
+    return seasonalText(row['班級代碼']) === classCode &&
+      seasonalText(row['科目代碼']) === subject &&
+      seasonalText(row['教師姓名']) === teacher;
   }).length;
 }
 
@@ -120,8 +119,8 @@ function seasonalCheckManualPlacement(options) {
   const rows = (options.schedule || []).filter(row => seasonalText(row['課表ID']) !== excludeId);
   const classConflict = rows.find(row => seasonalSlotKey(row['班級代碼'], row['日期'], row['節次']) === seasonalSlotKey(classCode, date, period));
   if (classConflict) return { ok: false, error: '該班此日期、節次已有課程。' };
-  if (teacher && seasonalTeacherBlocked(teacher, date, options.teacherBlocks)) {
-    return { ok: false, error: '此教師在設定的停排期間，不能安排於 ' + date + '。' };
+  if (teacher && seasonalTeacherBlocked(teacher, date, period, options.teacherBlocks)) {
+    return { ok: false, error: '此教師在 ' + date + ' 第' + period + '節為停排時段，不能安排課程。' };
   }
   if (teacher && rows.some(row => seasonalTeacherSlotKey(row['教師姓名'], row['日期'], row['節次']) === seasonalTeacherSlotKey(teacher, date, period))) {
     return { ok: false, error: '此教師同一時段已有其他班級課程。' };
@@ -129,22 +128,16 @@ function seasonalCheckManualPlacement(options) {
   return { ok: true };
 }
 
-function seasonalCandidateReason(need, slots, busyClass, busyTeacher, teachingDays, blocks, activityStart) {
-  const startWeek = Number(need['起始週']) || 1;
-  const endWeek = Number(need['結束週']) || startWeek;
-  const validDates = (teachingDays || []).filter(date => {
-    const week = seasonalWeekNo(date, activityStart);
-    return week >= startWeek && week <= endWeek;
-  });
+function seasonalCandidateReason(need, busyClass, busyTeacher, teachingDays, blocks) {
+  const days = teachingDays || [];
+  if (!days.length) return '尚未設定實際上課日';
   const teacher = seasonalText(need['教師姓名']);
-  const available = validDates.filter(date => !seasonalTeacherBlocked(teacher, date, blocks));
-  if (!validDates.length) return '指定週別沒有實際上課日';
-  if (!available.length) return '教師在指定週別全程停排';
-  const freeSlots = available.reduce((sum, date) => sum + [2, 3, 4, 5].filter(period =>
+  const freeSlots = days.reduce((sum, date) => sum + [2, 3, 4, 5].filter(period =>
+    !seasonalTeacherBlocked(teacher, date, period, blocks) &&
     !busyClass.has(seasonalSlotKey(need['班級代碼'], date, period)) &&
     (!teacher || !busyTeacher.has(seasonalTeacherSlotKey(teacher, date, period)))
   ).length, 0);
-  return freeSlots ? '指定期間還有可用格位' : '指定期間的班級或教師時段已滿';
+  return freeSlots ? '活動期間還有可用格位' : '活動期間的班級或教師時段已滿';
 }
 
 function seasonalBuildPlan(options) {
@@ -174,9 +167,6 @@ function seasonalBuildPlan(options) {
     }
   }
 
-  const weeks = seasonalGetWeekRanges(session['開始日期'], session['結束日期'], options.days || []);
-  const weekByDate = new Map();
-  weeks.forEach(item => item.teachingDates.forEach(date => weekByDate.set(date, item.week)));
   const needs = (options.needs || []).map(need => ({ ...need }));
   const lessonNeeds = [];
   needs.forEach(need => {
@@ -186,11 +176,9 @@ function seasonalBuildPlan(options) {
       const rowNeedId = seasonalText(row['需求ID']);
       if (rowNeedId && rowNeedId === seasonalText(need['需求ID'])) return true;
       if (rowNeedId && seasonalText(need['需求ID'])) return false;
-      if (seasonalText(row['班級代碼']) !== seasonalText(need['班級代碼']) ||
-          seasonalText(row['科目代碼']) !== seasonalText(need['科目代碼']) ||
-          seasonalText(row['教師姓名']) !== seasonalText(need['教師姓名'])) return false;
-      const week = weekByDate.get(seasonalIso(row['日期'])) || 0;
-      return week >= (Number(need['起始週']) || 1) && week <= (Number(need['結束週']) || Number(need['起始週']) || 1);
+      return seasonalText(row['班級代碼']) === seasonalText(need['班級代碼']) &&
+        seasonalText(row['科目代碼']) === seasonalText(need['科目代碼']) &&
+        seasonalText(row['教師姓名']) === seasonalText(need['教師姓名']);
     });
     const assigned = countedRows.length;
     if (assigned < required) lessonNeeds.push({ need, remaining: required - assigned });
@@ -224,13 +212,10 @@ function seasonalBuildPlan(options) {
     for (let index = 0; index < lessonNeeds.length; index++) {
       const need = lessonNeeds[index].need;
       const teacher = seasonalText(need['教師姓名']);
-      const startWeek = Number(need['起始週']) || 1;
-      const endWeek = Number(need['結束週']) || startWeek;
       const candidates = [];
       activeDays.forEach(date => {
-        const week = weekByDate.get(date) || 0;
-        if (week < startWeek || week > endWeek || seasonalTeacherBlocked(teacher, date, blocks)) return;
         [2, 3, 4, 5].forEach(period => {
+          if (seasonalTeacherBlocked(teacher, date, period, blocks)) return;
           const classKey = seasonalSlotKey(need['班級代碼'], date, period);
           const teacherKey = seasonalTeacherSlotKey(teacher, date, period);
           if (busyClass.has(classKey) || (teacher && busyTeacher.has(teacherKey))) return;
@@ -250,7 +235,7 @@ function seasonalBuildPlan(options) {
     const selected = lessonNeeds[bestIndex];
     const need = selected.need;
     if (!bestCandidates || !bestCandidates.length) {
-      unassigned.push({ need, remaining: selected.remaining, reason: seasonalCandidateReason(need, null, busyClass, busyTeacher, activeDays, blocks, startDate) });
+      unassigned.push({ need, remaining: selected.remaining, reason: seasonalCandidateReason(need, busyClass, busyTeacher, activeDays, blocks) });
       lessonNeeds.splice(bestIndex, 1);
       continue;
     }
@@ -269,7 +254,7 @@ function seasonalBuildPlan(options) {
       '手動安排': 'FALSE',
       '需求ID': seasonalText(need['需求ID'])
     };
-    row['_週別'] = weekByDate.get(chosen.date) || 0;
+    row['_週別'] = seasonalWeekNo(chosen.date, startDate) || 0;
     schedule.push(row);
     busyClass.add(seasonalSlotKey(row['班級代碼'], row['日期'], row['節次']));
     if (teacher) busyTeacher.add(seasonalTeacherSlotKey(teacher, row['日期'], row['節次']));
@@ -328,26 +313,6 @@ function seasonalGetCurrentWeeks() {
   return seasonalGetWeekRanges(session['開始日期'], session['結束日期'], seasonalActiveRows('seasonalDays'));
 }
 
-function seasonalWeekLabel(week) {
-  const item = seasonalGetCurrentWeeks().find(row => row.week === Number(week));
-  if (!item) return '第' + week + '週';
-  return '第' + week + '週（' + item.startDate.slice(5).replace('-', '/') + '～' + item.endDate.slice(5).replace('-', '/') + '）';
-}
-
-function seasonalFillWeekSelect(id, selectedValue) {
-  const select = document.getElementById(id);
-  if (!select) return;
-  const weeks = seasonalGetCurrentWeeks();
-  const wanted = String(selectedValue || select.value || '1');
-  select.innerHTML = weeks.map(item => '<option value="' + item.week + '">' + esc(seasonalWeekLabel(item.week)) + '</option>').join('');
-  if (!weeks.length) select.innerHTML = '<option value="1">請先設定活動日期</option>';
-  if (weeks.some(item => String(item.week) === wanted)) select.value = wanted;
-}
-
-function seasonalUpdateWeekSelects() {
-  ['seasonal-need-week-start', 'seasonal-need-week-end', 'seasonal-block-week-start', 'seasonal-block-week-end', 'seasonal-edit-need-week-start', 'seasonal-edit-need-week-end'].forEach(id => seasonalFillWeekSelect(id));
-}
-
 function seasonalFillTeacherOptions() {
   const codes = new Set([
     ...(state.teachers || []).map(teacher => seasonalText(teacher['教師姓名'] || teacher['姓名'])),
@@ -379,11 +344,9 @@ function seasonalIsGrade9Class(row) {
 }
 
 function seasonalGetGrade9Classes() {
-  const allClasses = (state.classes || []).filter(row =>
-    String(row['是否虛擬班'] || '').toUpperCase() !== 'TRUE'
+  return (state.classes || []).filter(row =>
+    String(row['是否虛擬班'] || '').toUpperCase() !== 'TRUE' && seasonalIsGrade9Class(row)
   );
-  const grade9 = allClasses.filter(seasonalIsGrade9Class);
-  return grade9.length > 0 ? grade9 : allClasses;
 }
 
 function seasonalPopulateClassSelects() {
@@ -480,12 +443,11 @@ function renderSeasonalWorkspace() {
   const timeWrap = document.getElementById('seasonal-period-times');
   timeWrap.innerHTML = timeList.map((item, index) => '<span><b>第' + (index + 1) + '節</b> ' + esc(item.start || '') + '－' + esc(item.end || '') + '</span>').join('');
   seasonalPopulateClassSelects();
-  seasonalFillTeacherOptions();
-  seasonalFillSubjectOptions();
   seasonalRenderDays();
-  seasonalUpdateWeekSelects();
   seasonalRenderNeeds();
   seasonalRenderTeacherBlocks();
+  seasonalFillTeacherOptions();
+  seasonalFillSubjectOptions();
   seasonalPopulateViewSelect();
   renderSeasonalTimetable();
   seasonalSetStatus('版本 ' + (session['版本號'] || '0'));
@@ -502,6 +464,10 @@ function initSeasonalModule() {
     seasonalPopulateViewSelect();
     renderSeasonalTimetable();
   });
+  const blockTeacherInput = document.getElementById('seasonal-block-teacher');
+  if (blockTeacherInput) {
+    blockTeacherInput.addEventListener('input', () => seasonalRenderTeacherBlockGrid());
+  }
 }
 
 function createSeasonalSession() {
@@ -550,7 +516,6 @@ function generateSeasonalTeachingDays() {
   });
   state.seasonalDays = (state.seasonalDays || []).filter(row => seasonalText(row['場次ID']) !== sessionId).concat(generated);
   seasonalRenderDays();
-  seasonalUpdateWeekSelects();
   seasonalRenderNeeds();
   seasonalRenderTeacherBlocks();
   seasonalSetStatus('日期已更新，尚未儲存');
@@ -590,7 +555,7 @@ function seasonalRenderDays() {
     }
     if (row) row['是否上課'] = input.checked ? 'TRUE' : 'FALSE';
     input.closest('.seasonal-day-chip')?.classList.toggle('is-active', input.checked);
-    seasonalUpdateWeekSelects();
+    seasonalRenderTeacherBlockGrid();
     seasonalSetStatus('上課日已更新，尚未儲存');
   }));
 }
@@ -678,10 +643,6 @@ function openSeasonalEditNeedModal(needId) {
   document.getElementById('seasonal-edit-need-subject').value = need['科目代碼'] || '';
   document.getElementById('seasonal-edit-need-teacher').value = need['教師姓名'] || '';
   document.getElementById('seasonal-edit-need-count').value = need['本期節數'] || '1';
-  seasonalFillWeekSelect('seasonal-edit-need-week-start');
-  seasonalFillWeekSelect('seasonal-edit-need-week-end');
-  document.getElementById('seasonal-edit-need-week-start').value = String(need['起始週'] || '1');
-  document.getElementById('seasonal-edit-need-week-end').value = String(need['結束週'] || need['起始週'] || '1');
   document.getElementById('seasonal-edit-need-modal')?.classList.add('show');
 }
 
@@ -697,18 +658,16 @@ async function saveSeasonalEditNeed() {
   const subject = seasonalText(document.getElementById('seasonal-edit-need-subject').value);
   const teacher = seasonalText(document.getElementById('seasonal-edit-need-teacher').value);
   const count = parseInt(document.getElementById('seasonal-edit-need-count').value, 10);
-  const startWeek = Number(document.getElementById('seasonal-edit-need-week-start').value) || 1;
-  const endWeek = Number(document.getElementById('seasonal-edit-need-week-end').value) || startWeek;
-  if (!classCode || !subject || !teacher || !Number.isInteger(count) || count < 1 || endWeek < startWeek) {
-    toast('請填妥班級、科目、教師、正整數節數及有效週別。', 'warning');
+  if (!classCode || !subject || !teacher || !Number.isInteger(count) || count < 1) {
+    toast('請填妥班級、科目、教師與正整數節數。', 'warning');
     return;
   }
   need['班級代碼'] = classCode;
   need['科目代碼'] = subject;
   need['教師姓名'] = teacher;
   need['本期節數'] = String(count);
-  need['起始週'] = String(startWeek);
-  need['結束週'] = String(endWeek);
+  delete need['起始週'];
+  delete need['結束週'];
   
   if (Array.isArray(state.seasonalSchedule)) {
     state.seasonalSchedule.forEach(row => {
@@ -735,12 +694,12 @@ function seasonalRenderNeeds() {
   if (!body) return;
   const rows = seasonalActiveRows('seasonalNeeds');
   body.innerHTML = rows.length ? rows.map(row => '<tr><td>' + esc(row['班級代碼']) + '</td><td>' + esc(row['科目代碼']) + '</td><td>' + esc(row['教師姓名']) +
-    '</td><td>' + esc(row['本期節數']) + '</td><td>' + esc(seasonalWeekLabel(row['起始週'])) + '～' + esc(seasonalWeekLabel(row['結束週'])) +
+    '</td><td>' + esc(row['本期節數']) +
     '</td><td><div style="display:flex;gap:4px;justify-content:center;">' +
     '<button class="btn btn-primary btn-xs" data-edit-need="' + esc(row['需求ID']) + '" type="button">編輯</button>' +
     '<button class="btn btn-ghost btn-xs text-danger" data-delete-need="' + esc(row['需求ID']) + '" type="button">刪除</button>' +
     '</div></td></tr>').join('') :
-    '<tr><td colspan="6" class="text-center text-muted">尚未設定課程需求</td></tr>';
+    '<tr><td colspan="5" class="text-center text-muted">尚未設定課程需求</td></tr>';
   body.querySelectorAll('[data-edit-need]').forEach(button => button.addEventListener('click', () => {
     openSeasonalEditNeedModal(button.dataset.editNeed);
   }));
@@ -773,15 +732,13 @@ async function addSeasonalNeed() {
   const subject = seasonalText(document.getElementById('seasonal-need-subject').value);
   const teacher = seasonalText(document.getElementById('seasonal-need-teacher').value);
   const count = parseInt(document.getElementById('seasonal-need-count').value, 10);
-  const startWeek = Number(document.getElementById('seasonal-need-week-start').value) || 1;
-  const endWeek = Number(document.getElementById('seasonal-need-week-end').value) || startWeek;
-  if (!subject || !teacher || !Number.isInteger(count) || count < 1 || endWeek < startWeek) {
-    toast('請填妥科目、教師、正整數節數及有效週別。', 'warning');
+  if (!subject || !teacher || !Number.isInteger(count) || count < 1) {
+    toast('請填妥科目、教師與正整數節數。', 'warning');
     return;
   }
   const newNeeds = selectedClasses.map(classCode => ({
     '需求ID': seasonalNewId('NEED'), '場次ID': seasonalActiveSessionId, '班級代碼': classCode,
-    '科目代碼': subject, '教師姓名': teacher, '本期節數': String(count), '起始週': String(startWeek), '結束週': String(endWeek)
+    '科目代碼': subject, '教師姓名': teacher, '本期節數': String(count)
   }));
   state.seasonalNeeds = [...(state.seasonalNeeds || []), ...newNeeds];
   document.getElementById('seasonal-need-subject').value = '';
@@ -796,12 +753,17 @@ async function addSeasonalNeed() {
 }
 
 function seasonalRenderTeacherBlocks() {
+  seasonalRenderTeacherBlockGrid();
   const body = document.getElementById('seasonal-blocks-body');
   if (!body) return;
-  const rows = seasonalActiveRows('seasonalTeacherBlocks');
-  body.innerHTML = rows.length ? rows.map(row => '<tr><td>' + esc(row['教師姓名']) + '</td><td>' + esc(seasonalDisplayDate(row['開始日期'])) + '～' + esc(seasonalDisplayDate(row['結束日期'])) +
-    '</td><td>' + esc(row['原因'] || '') + '</td><td><button class="btn btn-ghost btn-xs" data-delete-block="' + esc(row['記錄ID']) + '" type="button">刪除</button></td></tr>').join('') :
-    '<tr><td colspan="4" class="text-center text-muted">尚未設定教師停排期間</td></tr>';
+  const rows = seasonalActiveRows('seasonalTeacherBlocks').slice().sort((a, b) =>
+    seasonalText(a['教師姓名']).localeCompare(seasonalText(b['教師姓名']), 'zh-Hant') ||
+    seasonalIso(a['日期']).localeCompare(seasonalIso(b['日期'])) ||
+    Number(a['節次']) - Number(b['節次']));
+  body.innerHTML = rows.length ? rows.map(row => '<tr><td>' + esc(row['教師姓名']) + '</td><td>' + esc(seasonalDisplayDate(row['日期'])) +
+    '</td><td>第' + esc(row['節次']) + '節</td><td>' + esc(row['原因'] || '') +
+    '</td><td><button class="btn btn-ghost btn-xs" data-delete-block="' + esc(row['記錄ID']) + '" type="button">刪除</button></td></tr>').join('') :
+    '<tr><td colspan="5" class="text-center text-muted">尚未設定教師停排時段</td></tr>';
   body.querySelectorAll('[data-delete-block]').forEach(button => button.addEventListener('click', async () => {
     state.seasonalTeacherBlocks = (state.seasonalTeacherBlocks || []).filter(row => seasonalText(row['記錄ID']) !== button.dataset.deleteBlock);
     seasonalRenderTeacherBlocks();
@@ -810,23 +772,54 @@ function seasonalRenderTeacherBlocks() {
   }));
 }
 
-async function addSeasonalTeacherBlock() {
-  const session = seasonalActiveSession();
-  const teacher = seasonalText(document.getElementById('seasonal-block-teacher').value);
-  const startWeek = Number(document.getElementById('seasonal-block-week-start').value) || 0;
-  const endWeek = Number(document.getElementById('seasonal-block-week-end').value) || startWeek;
-  const weeks = seasonalGetCurrentWeeks();
-  const first = weeks.find(row => row.week === startWeek);
-  const last = weeks.find(row => row.week === endWeek);
-  if (!session || !teacher || !first || !last || endWeek < startWeek) {
-    toast('請先設定活動日期，並選擇教師與有效停排週別。', 'warning');
+function seasonalRenderTeacherBlockGrid() {
+  const wrap = document.getElementById('seasonal-block-grid');
+  if (!wrap) return;
+  const teacher = seasonalText(document.getElementById('seasonal-block-teacher')?.value);
+  if (!teacher) {
+    wrap.innerHTML = '<div class="seasonal-empty-inline">請先輸入或選擇教師，即可開始點選停排時段。</div>';
     return;
   }
-  state.seasonalTeacherBlocks = [...(state.seasonalTeacherBlocks || []), {
-    '記錄ID': seasonalNewId('BLOCK'), '場次ID': seasonalActiveSessionId, '教師姓名': teacher,
-    '開始日期': first.startDate, '結束日期': last.endDate, '原因': seasonalText(document.getElementById('seasonal-block-reason').value)
-  }];
-  document.getElementById('seasonal-block-reason').value = '';
+  const session = seasonalActiveSession();
+  const days = seasonalActiveRows('seasonalDays').filter(row => seasonalIsTrue(row['是否上課']))
+    .map(row => seasonalIso(row['日期'])).filter(Boolean).sort();
+  if (!days.length) {
+    wrap.innerHTML = '<div class="seasonal-empty-inline">請先設定實際上課日。</div>';
+    return;
+  }
+  const blocks = seasonalActiveRows('seasonalTeacherBlocks');
+  const head = '<thead><tr><th>日期</th>' + [1, 2, 3, 4, 5].map(period => '<th>第' + period + '節</th>').join('') + '</tr></thead>';
+  const rows = days.map(date => {
+    const week = seasonalWeekNo(date, session && session['開始日期']);
+    const cells = ['<td class="seasonal-date-cell"><b>' + esc(seasonalDisplayDate(date)) + '</b><small>第' + week + '週</small></td>'];
+    for (let period = 1; period <= 5; period++) {
+      const blocked = seasonalTeacherBlocked(teacher, date, period, blocks);
+      cells.push('<td><button type="button" class="seasonal-block-cell' + (blocked ? ' is-blocked' : '') + '" data-date="' + esc(date) + '" data-period="' + period + '">' + (blocked ? '停排' : '') + '</button></td>');
+    }
+    return '<tr>' + cells.join('') + '</tr>';
+  }).join('');
+  wrap.innerHTML = '<table class="seasonal-timetable-table seasonal-block-table">' + head + '<tbody>' + rows + '</tbody></table>';
+  wrap.querySelectorAll('.seasonal-block-cell').forEach(button => button.addEventListener('click', () => {
+    seasonalToggleTeacherBlock(teacher, button.dataset.date, Number(button.dataset.period));
+  }));
+}
+
+async function seasonalToggleTeacherBlock(teacher, date, period) {
+  const target = seasonalIso(date);
+  const slot = Number(period);
+  if (!seasonalText(teacher) || !target || !Number.isInteger(slot)) return;
+  const existing = seasonalActiveRows('seasonalTeacherBlocks').find(row =>
+    seasonalText(row['教師姓名']) === seasonalText(teacher) &&
+    seasonalIso(row['日期']) === target &&
+    Number(row['節次']) === slot);
+  if (existing) {
+    state.seasonalTeacherBlocks = (state.seasonalTeacherBlocks || []).filter(row => seasonalText(row['記錄ID']) !== seasonalText(existing['記錄ID']));
+  } else {
+    state.seasonalTeacherBlocks = [...(state.seasonalTeacherBlocks || []), {
+      '記錄ID': seasonalNewId('BLOCK'), '場次ID': seasonalActiveSessionId, '教師姓名': seasonalText(teacher),
+      '日期': target, '節次': String(slot), '原因': seasonalText(document.getElementById('seasonal-block-reason')?.value)
+    }];
+  }
   seasonalRenderTeacherBlocks();
   seasonalFillTeacherOptions();
   seasonalPopulateViewSelect();
@@ -840,8 +833,6 @@ function seasonalGetScheduleCell(classCode, date, period) {
 
 function seasonalFindNeedForManual(classCode, date, period, subject, teacherCode, excludeId) {
   if (Number(period) === 1) return '';
-  const session = seasonalActiveSession();
-  const week = seasonalWeekNo(date, session && session['開始日期']);
   const rows = seasonalActiveRows('seasonalSchedule').filter(row =>
     seasonalText(row['課表ID']) !== seasonalText(excludeId) && Number(row['節次']) !== 1
   );
@@ -849,15 +840,11 @@ function seasonalFindNeedForManual(classCode, date, period, subject, teacherCode
     if (seasonalText(need['班級代碼']) !== seasonalText(classCode) ||
         seasonalText(need['科目代碼']) !== seasonalText(subject) ||
         seasonalText(need['教師姓名']) !== seasonalText(teacherCode)) return false;
-    const firstWeek = Number(need['起始週']) || 1;
-    const lastWeek = Number(need['結束週']) || firstWeek;
-    if (week < firstWeek || week > lastWeek) return false;
     const count = rows.filter(row => {
       if (seasonalText(row['需求ID'])) return seasonalText(row['需求ID']) === seasonalText(need['需求ID']);
       return seasonalText(row['班級代碼']) === seasonalText(need['班級代碼']) &&
         seasonalText(row['科目代碼']) === seasonalText(need['科目代碼']) &&
-        seasonalText(row['教師姓名']) === seasonalText(need['教師姓名']) &&
-        (() => { const rowWeek = seasonalWeekNo(row['日期'], session['開始日期']); return rowWeek >= firstWeek && rowWeek <= lastWeek; })();
+        seasonalText(row['教師姓名']) === seasonalText(need['教師姓名']);
     }).length;
     return count < (parseInt(need['本期節數'], 10) || 0);
   });
@@ -879,6 +866,7 @@ function toggleSeasonalMultiSelectMode(enabled) {
   if (!seasonalMultiSelectMode) {
     clearSeasonalSelectedSlots();
   }
+  if (typeof renderSeasonalTimetable === 'function') renderSeasonalTimetable();
 }
 
 function clearSeasonalSelectedSlots() {
@@ -944,8 +932,8 @@ async function saveSeasonalBatchAssign() {
   // 檢查教師停排
   if (teacher) {
     for (const slot of slots) {
-      if (seasonalTeacherBlocked(teacher, slot.date, teacherBlocks)) {
-        toast(teacher + ' 老師在 ' + seasonalDisplayDate(slot.date) + ' 為停排期間！', 'warning');
+      if (seasonalTeacherBlocked(teacher, slot.date, slot.period, teacherBlocks)) {
+        toast(teacher + ' 老師在 ' + seasonalDisplayDate(slot.date) + ' 第' + slot.period + '節為停排時段！', 'warning');
         return;
       }
     }
@@ -1074,7 +1062,7 @@ function renderSeasonalTimetable() {
       for (let period = 1; period <= 5; period++) {
         const item = seasonalGetScheduleCell(person, date, period);
         const text = item ? esc(item['科目代碼']) + (item['教師姓名'] ? '<small>' + esc(item['教師姓名']) + '</small>' : '') : '<span class="seasonal-add-mark">＋</span>';
-        const canDrag = item && !seasonalIsTrue(item['是否鎖定']);
+        const canDrag = item && !seasonalIsTrue(item['是否鎖定']) && !seasonalMultiSelectMode;
         cells.push('<td><button class="seasonal-slot-button ' + (period === 1 ? 'is-manual-period ' : '') + (item ? 'has-course' : '') + '" type="button" draggable="' + (canDrag ? 'true' : 'false') + '" data-id="' + esc(item ? item['課表ID'] : '') + '" data-class="' + esc(person) + '" data-date="' + esc(date) + '" data-period="' + period + '">' + text + '</button></td>');
       }
       return '<tr>' + cells.join('') + '</tr>';
@@ -1174,19 +1162,12 @@ async function moveSeasonalCell(scheduleId, date, period) {
     return;
   }
   const targetDate = seasonalIso(date);
-  const targetWeek = seasonalWeekNo(targetDate, seasonalActiveSession()?.['開始日期']);
-  const needId = seasonalText(row['需求ID']);
-  const need = needId ? seasonalActiveRows('seasonalNeeds').find(item => seasonalText(item['需求ID']) === needId) : null;
   if (!seasonalActiveRows('seasonalDays').some(item => seasonalIso(item['日期']) === targetDate && seasonalIsTrue(item['是否上課']))) {
     toast('只能移至實際上課日。', 'warning');
     return;
   }
   if (Number(period) === 1 && !seasonalIsTrue(row['手動安排'])) {
     toast('第一節只能手動安排，請先以手動方式建立此格。', 'warning');
-    return;
-  }
-  if (need && (targetWeek < (Number(need['起始週']) || 1) || targetWeek > (Number(need['結束週']) || Number(need['起始週']) || 1))) {
-    toast('此課程只能安排在第' + need['起始週'] + '～' + need['結束週'] + '週。', 'warning');
     return;
   }
   const validation = seasonalCheckManualPlacement({

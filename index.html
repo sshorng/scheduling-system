@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261007_v3_grade9_batch">
+  <link rel="stylesheet" href="style.css?v=20261007_v4_seasonal_slots">
 </head>
 <body>
 
@@ -832,7 +832,7 @@
         <div>
           <div class="seasonal-kicker">DATE-BASED SCHEDULING</div>
           <h2>寒暑輔排課工作台</h2>
-          <p>每場活動獨立管理日期、課程總節數與教師停排期間。第一節由你手動安排，自動排課使用第 2 至第 5 節。</p>
+          <p>每場活動獨立管理日期、課程總節數與教師停排時段。第一節由你手動安排，自動排課使用第 2 至第 5 節。</p>
         </div>
         <div class="seasonal-toolbar-actions">
           <label for="seasonal-session-select">活動場次</label>
@@ -891,23 +891,20 @@
               <div class="form-group"><label for="seasonal-need-subject">科目</label><input id="seasonal-need-subject" type="text" list="seasonal-subject-options" placeholder="例：生物"><datalist id="seasonal-subject-options"></datalist></div>
               <div class="form-group"><label for="seasonal-need-teacher">教師</label><input id="seasonal-need-teacher" type="text" list="seasonal-teacher-options" placeholder="選擇或輸入教師"><datalist id="seasonal-teacher-options"></datalist></div>
               <div class="form-group"><label for="seasonal-need-count">本期節數</label><input id="seasonal-need-count" type="number" min="1" step="1" value="1"></div>
-              <div class="form-group"><label for="seasonal-need-week-start">起始週</label><select id="seasonal-need-week-start"></select></div>
-              <div class="form-group"><label for="seasonal-need-week-end">結束週</label><select id="seasonal-need-week-end"></select></div>
             </div>
             <div class="flex justify-end" style="margin:8px 0 12px;"><button class="btn btn-primary btn-sm" type="button" onclick="addSeasonalNeed()">＋ 新增需求</button></div>
-            <div class="seasonal-table-scroll"><table class="data-table compact-table"><thead><tr><th>班級</th><th>科目</th><th>教師</th><th>節數</th><th>授課週別</th><th></th></tr></thead><tbody id="seasonal-needs-body"></tbody></table></div>
+            <div class="seasonal-table-scroll"><table class="data-table compact-table"><thead><tr><th>班級</th><th>科目</th><th>教師</th><th>節數</th><th></th></tr></thead><tbody id="seasonal-needs-body"></tbody></table></div>
           </section>
 
           <section class="panel-card">
-            <div class="seasonal-section-heading"><div><span class="seasonal-step">3</span><strong>教師停排期間</strong></div></div>
+            <div class="seasonal-section-heading"><div><span class="seasonal-step">3</span><strong>教師停排</strong></div></div>
             <div class="seasonal-form-grid seasonal-block-form">
               <div class="form-group"><label for="seasonal-block-teacher">教師</label><input id="seasonal-block-teacher" type="text" list="seasonal-teacher-options" placeholder="選擇或輸入教師"></div>
-              <div class="form-group"><label for="seasonal-block-week-start">起始週</label><select id="seasonal-block-week-start"></select></div>
-              <div class="form-group"><label for="seasonal-block-week-end">結束週</label><select id="seasonal-block-week-end"></select></div>
-              <div class="form-group"><label for="seasonal-block-reason">原因</label><input id="seasonal-block-reason" type="text" placeholder="例：出國"></div>
+              <div class="form-group"><label for="seasonal-block-reason">原因</label><input id="seasonal-block-reason" type="text" placeholder="例：出國（套用到新設定）"></div>
             </div>
-            <div class="flex justify-end" style="margin:8px 0 12px;"><button class="btn btn-danger btn-sm" type="button" onclick="addSeasonalTeacherBlock()">＋ 設定停排</button></div>
-            <div class="seasonal-table-scroll"><table class="data-table compact-table"><thead><tr><th>教師</th><th>停排日期</th><th>原因</th><th></th></tr></thead><tbody id="seasonal-blocks-body"></tbody></table></div>
+            <div class="seasonal-days-heading" style="margin-top:12px;"><strong>停排時段</strong><span class="text-muted">選擇教師後，點選日期 × 節次格位即可設定或取消停排。</span></div>
+            <div id="seasonal-block-grid" class="seasonal-timetable-scroll"></div>
+            <div class="seasonal-table-scroll" style="margin-top:12px;"><table class="data-table compact-table"><thead><tr><th>教師</th><th>日期</th><th>節次</th><th>原因</th><th></th></tr></thead><tbody id="seasonal-blocks-body"></tbody></table></div>
           </section>
         </div>
 
@@ -1011,16 +1008,6 @@
     <div class="form-group">
       <label for="seasonal-edit-need-count">本期節數</label>
       <input id="seasonal-edit-need-count" type="number" min="1" step="1" value="1">
-    </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-      <div class="form-group">
-        <label for="seasonal-edit-need-week-start">起始週</label>
-        <select id="seasonal-edit-need-week-start"></select>
-      </div>
-      <div class="form-group">
-        <label for="seasonal-edit-need-week-end">結束週</label>
-        <select id="seasonal-edit-need-week-end"></select>
-      </div>
     </div>
     <div class="modal-actions" style="margin-top:16px;">
       <button class="btn btn-ghost" type="button" onclick="closeSeasonalEditNeedModal()">取消</button>
@@ -1290,9 +1277,9 @@
 <script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.4/dist/pizzip.min.js"></script>
 <script src="https://unpkg.com/file-saver@2.0.5/dist/FileSaver.min.js"></script>
    <script src="word-export.js?v=20260827_v1222_teacher_pullout_class_layout"></script>
-   <script src="seasonal-schedule.js?v=20261007_v3_grade9_batch"></script>
-   <script src="seasonal-export.js?v=20261007_v3_grade9_batch"></script>
-   <script src="app.js?v=20261007_v3_grade9_batch"></script>
-   <script src="app-runtime.js?v=20261007_v3_grade9_batch"></script>
+   <script src="seasonal-schedule.js?v=20261007_v4_seasonal_slots"></script>
+   <script src="seasonal-export.js?v=20261007_v4_xlsx_element_order_fix"></script>
+   <script src="app.js?v=20261007_v4_seasonal_slots"></script>
+   <script src="app-runtime.js?v=20261007_v4_seasonal_slots"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@ let _seasonalTplCache = {};
 
 async function seasonalLoadTemplate(kind) {
   if (_seasonalTplCache[kind]) return _seasonalTplCache[kind];
-  const file = kind === 'teacher' ? 'seasonal-teacher-template.xlsx' : 'seasonal-class-template.xlsx';
+  const file = kind === 'teacher' ? 'assets/templates/seasonal-teacher-template.xlsx' : 'assets/templates/seasonal-class-template.xlsx';
   const resp = await fetch(file + '?t=' + Date.now());
   if (!resp.ok) throw new Error('無法載入寒暑輔 Excel 範本 HTTP ' + resp.status + '：' + file);
   const zip = parseDocxZip(await resp.arrayBuffer());

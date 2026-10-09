@@ -6018,42 +6018,6 @@ function showCtxMenu(x, y, hasContent, isLocked, options) {
 }
 document.addEventListener('click', () => { document.getElementById('ctx-menu').style.display = 'none'; });
 
-document.getElementById('ctx-assign').onclick = () => {
-  if (!ui.ctxTarget) return;
-  const { cls, day, per } = ui.ctxTarget;
-  openAssignModal(cls, day, per);
-};
-document.getElementById('ctx-edit').onclick = () => {
-  if (!ui.ctxTarget) return;
-  const { cls, day, per } = ui.ctxTarget;
-  openAssignModal(cls, day, per);
-};
-document.getElementById('ctx-lock').onclick = () => {
-  const t = ui.ctxTarget;
-  if (!t || !t.cell) return;
-  optimisticLockCell(t.cls, t.day, t.per, true, t.week);
-};
-document.getElementById('ctx-unlock').onclick = () => {
-  const t = ui.ctxTarget;
-  if (!t || !t.cell) return;
-  optimisticLockCell(t.cls, t.day, t.per, false, t.week);
-};
-document.getElementById('ctx-overtime').onclick = () => {
-  const t = ui.ctxTarget;
-  if (!t || !t.cell || !t.teacherView || t.per === 8 || isManualOnlyPeriod(t.per)) return;
-   optimisticSetOvertime(t.cls, t.day, t.per, t.teacherCode, !isOvertimeScheduleEntry(t.cell, t.teacherCode));
-};
-document.getElementById('ctx-clear').onclick = async () => {
-  const t = ui.ctxTarget;
-  if (!t) return;
-  const isLocked = t.cell && String(t.cell['是否鎖定']).toUpperCase()==='TRUE';
-  if (isLocked) {
-    const ok = await showModal('確認', '此格已鎖定，仍要清除嗎？', 'confirm');
-    if (!ok) return;
-  }
-  optimisticClearCell(t.cls, t.day, t.per, t.week);
-};
-
 // ============================================================
 // 設定頁：配課
 // ============================================================

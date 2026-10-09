@@ -3,14 +3,14 @@ const path = require('path');
 const vm = require('vm');
 const root = path.resolve(__dirname, '..');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
-const app = read('app.js');
-const runtime = read('app-runtime.js');
-const wordExport = read('word-export.js');
-const seasonal = read('seasonal-schedule.js');
-const seasonalExport = read('seasonal-export.js');
+const app = read('js/app.js');
+const runtime = read('js/app-runtime.js');
+const wordExport = read('js/word-export.js');
+const seasonal = read('js/seasonal-schedule.js');
+const seasonalExport = read('js/seasonal-export.js');
 const backend = read('Code.gs');
 const html = read('index.html');
-const styles = read('style.css');
+const styles = read('css/style.css');
 const weeklyHelperContext = {
   parseWeeklyValue(value, fallback = 0) {
     const raw = String(value ?? '').trim().replace(',', '.');
@@ -1378,7 +1378,7 @@ check('Teacher block table follows teacher order and shows compressed slot hover
     if (!app.includes(marker)) throw new Error('teacher block navigation marker missing: ' + marker);
   }
   if (!app.includes("'teacher-pick-item' + (hasBlock ? ' has-block' : '')")) throw new Error('configured teachers are not highlighted');
-  if (!read('style.css').includes('.teacher-block-row.is-focus')) throw new Error('teacher block focus style missing');
+  if (!read('css/style.css').includes('.teacher-block-row.is-focus')) throw new Error('teacher block focus style missing');
 });
 check('Batch assignment schema keeps existing notes', () => {
   if (!backend.includes("'每週節數', '備註'")) throw new Error('assignment note header missing');
@@ -1397,7 +1397,7 @@ check('Bind groups reject duplicate teachers and teacher grid shows collisions',
   const firstCell = teacherBlock.indexOf('const cell = cells[0]');
   if (conflictCheck < 0 || firstCell < 0 || conflictCheck > firstCell) throw new Error('teacher grid still hides collisions behind the first lesson');
    if (!app.includes("td.classList.add('filled', 'conflict')")) throw new Error('partial teacher-cell refresh lacks collision state');
-   if (!read('style.css').includes('.tt-cell.conflict')) throw new Error('teacher collision style missing');
+   if (!read('css/style.css').includes('.tt-cell.conflict')) throw new Error('teacher collision style missing');
    if (!autoBlock.includes('bind-group-weekly-mismatch')) throw new Error('bind-group weekly mismatch failure category missing');
     if (!autoBlock.includes('invalidBindGroups.has(group.__bindParentGroup || group)')) throw new Error('bind-group weekly mismatch gate missing');
    const bindDefinitionStart = autoBlock.indexOf('const bindWeeklyMismatchByKey');
@@ -2089,7 +2089,7 @@ check('Class assignment matrix renders subject columns and teacher cells', () =>
    if (!runtime.includes('isHelperSubjectCodeForCount')) throw new Error('班級配課矩陣缺少課輔節數排除規則');
    if (!app.includes('function isHelperSubjectCode')) throw new Error('課輔科目辨識函式缺少');
    if (!app.includes("!isHelperSubjectCode(entry['科目代碼'])")) throw new Error('班級選單未排除課輔已排節數');
-  const css = read('style.css');
+  const css = read('css/style.css');
   if (!css.includes('.assignment-matrix-table .asgn-matrix-action-col') || !css.includes('right: 0')) throw new Error('配課操作欄沒有固定在右側');
   if (!css.includes('--asgn-matrix-class-width: 92px')) throw new Error('班級欄位仍未縮窄');
   if (!css.includes('repeating-linear-gradient(135deg, #f8fafc, #f8fafc 5px, #e2e8f0 5px, #e2e8f0 10px)')) throw new Error('不適用科目沒有灰色斜線底');
@@ -2177,7 +2177,7 @@ check('Third timetable comparison pane preserves base widths', () => {
   const roomEnd = app.indexOf('// ============================================================\n// 課表渲染', roomStart);
   if (!app.slice(roomStart, roomEnd).includes('draggable: false')) throw new Error('room timetable is not read-only');
   if (!app.slice(roomStart, roomEnd).includes("container.classList.add('room-readonly')")) throw new Error('room read-only styling marker missing');
-  const css = read('style.css');
+  const css = read('css/style.css');
   if (!css.includes('#tt-layout.third-open') || !css.includes('width: calc(150% + 7px)')) throw new Error('third timetable does not extend horizontally');
   if (!css.includes('.third-view-control[hidden]') || !css.includes('display: none !important')) throw new Error('third hidden controls can still occupy space');
   if (!css.includes('#tt-layout { display: grid') || !css.includes('align-items: start')) throw new Error('timetable cards are not top-aligned');
@@ -2197,10 +2197,18 @@ check('Main tab DOM hierarchy', () => {
   if (parents['subpanel-constraints-rule'] !== 'panel-constraints') throw new Error('subject constraint panel nesting');
   if (parents['subpanel-constraints-relation'] !== 'panel-constraints') throw new Error('subject relation panel nesting');
 });
-check('Versioned local assets', () => {
-  for (const asset of ['style.css','word-export.js','seasonal-schedule.js','seasonal-export.js','app.js','app-runtime.js']) {
-    const escaped = asset.replace('.', '\\.');
-    if (!(new RegExp(`${escaped}\\?v=[^"']+`)).test(html)) throw new Error(`${asset} is not versioned`);
+check('Versioned local assets share one build token', () => {
+  const assets = ['css/style.css','js/word-export.js','js/seasonal-schedule.js','js/seasonal-export.js','js/app.js','js/app-runtime.js'];
+  const versions = new Set();
+  for (const asset of assets) {
+    const escaped = asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = html.match(new RegExp(`${escaped}\\?v=([^"']+)`));
+    if (!match) throw new Error(`${asset} is not versioned`);
+    versions.add(match[1]);
+  }
+  if (versions.size !== 1) throw new Error(`asset build tokens diverged: ${[...versions].join(', ')}`);
+  if (html.includes('cdn.jsdelivr.net/npm/pizzip') || html.includes('unpkg.com/file-saver')) {
+    throw new Error('third-party libs must load from assets/ instead of CDN');
   }
 });
 check('Initial data load is not duplicated', () => {
@@ -2809,7 +2817,7 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
      'cell.dataset.patrolDraggable',
      'patrol-stats-table'
    ]) if (!app.includes(marker)) throw new Error('巡堂功能標記缺少：' + marker);
-   if (!read('style.css').includes('.tt-scroll > div[id$="-tt"]')) throw new Error('巡堂統計仍可能被課表最小高度撐開');
+   if (!read('css/style.css').includes('.tt-scroll > div[id$="-tt"]')) throw new Error('巡堂統計仍可能被課表最小高度撐開');
    if (html.includes('id="teacher-patrol-toggle"') || html.includes('doExportPatrol')) throw new Error('巡堂按鈕仍存在');
    if (html.includes('third-patrol-select-move') || app.includes('pointerPatrol')) throw new Error('巡堂不應包含替代點選或指標拖曳流程');
    if (html.includes('patrol-config') || html.includes('巡堂設定')) throw new Error('巡堂設定頁籤仍存在');
@@ -2855,8 +2863,8 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
    vm.runInContext(wordExport.slice(start, end), context, { filename: 'patrol-excel.js' });
    const zipContext = { window: {}, self: {}, globalThis: {} };
    vm.createContext(zipContext);
-   vm.runInContext(read('pizzip.min.js'), zipContext, { filename: 'pizzip.min.js' });
-   const zip = new zipContext.window.PizZip(fs.readFileSync(path.join(root, 'walkthrough-template.xlsx')).toString('binary'));
+   vm.runInContext(read('assets/pizzip.min.js'), zipContext, { filename: 'pizzip.min.js' });
+   const zip = new zipContext.window.PizZip(fs.readFileSync(path.join(root, 'assets/templates/walkthrough-template.xlsx')).toString('binary'));
    const generated = context.buildPatrolExcelSheetXml(
      zip.file('xl/worksheets/sheet1.xml').asText(),
      zip.file('xl/sharedStrings.xml').asText(),

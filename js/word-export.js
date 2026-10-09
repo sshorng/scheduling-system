@@ -1830,7 +1830,7 @@ function mergeEmptyFlexRows(pageXml, flexCount) {
 
 async function loadTemplate() {
   if (_tplCache) return _tplCache;
-  const resp = await fetch('class-official-template.docx?t=' + Date.now());
+  const resp = await fetch('assets/templates/class-official-template.docx?t=' + Date.now());
   if (!resp.ok) throw new Error('無法載入模板 HTTP ' + resp.status);
   const buf = await resp.arrayBuffer();
   const zip = parseDocxZip(buf);
@@ -1856,7 +1856,7 @@ async function loadTemplate() {
 
 async function loadTeacherTemplate() {
   if (_teacherTplCache) return _teacherTplCache;
-  const resp = await fetch('teacher-official-template.docx?t=' + Date.now());
+  const resp = await fetch('assets/templates/teacher-official-template.docx?t=' + Date.now());
   if (!resp.ok) throw new Error('無法載入教師模板 HTTP ' + resp.status);
   const buf = await resp.arrayBuffer();
   const zip = parseDocxZip(buf);
@@ -2462,7 +2462,7 @@ function buildPatrolExcelSheetXml(sheetXml, sharedStringsXml, yearNum, semNum) {
 
 async function loadPatrolExcelTemplate() {
   if (_patrolExcelTplCache) return _patrolExcelTplCache;
-  const resp = await fetch('walkthrough-template.xlsx?t=' + Date.now());
+  const resp = await fetch('assets/templates/walkthrough-template.xlsx?t=' + Date.now());
   if (!resp.ok) throw new Error('無法載入巡堂 Excel 範本 HTTP ' + resp.status);
   const buf = await resp.arrayBuffer();
   const zip = parseDocxZip(buf);
@@ -2687,7 +2687,7 @@ async function startTeacherWordExport() {
 
 async function loadRoomTemplate() {
   if (_roomTplCache) return _roomTplCache;
-  const resp = await fetch('room-official-template.docx?t=' + Date.now());
+  const resp = await fetch('assets/templates/room-official-template.docx?t=' + Date.now());
   if (!resp.ok) throw new Error('無法載入教室模板 HTTP ' + resp.status);
   const buf = await resp.arrayBuffer();
   const zip = parseDocxZip(buf);

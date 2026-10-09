@@ -27,3 +27,13 @@ patch_dfs.py
 .env.*
 *.pem
 *.key
+# Google Drive 捷徑檔（非一般檔案，git 無法索引）
+*.gsheet
+
+# Office 暫存與鎖定檔
+~$*.docx
+~$*.xlsx
+
+# Node / 建置產物
+node_modules/
+dist/

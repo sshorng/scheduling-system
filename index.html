@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20261007_v5_seasonal_colors">
+  <link rel="stylesheet" href="css/style.css?v=20261007_v7_refactor">
 </head>
 <body>
 
@@ -1287,13 +1287,14 @@
   </div>
 </div>
 
-<script src="pizzip.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pizzip@3.1.4/dist/pizzip.min.js"></script>
-<script src="https://unpkg.com/file-saver@2.0.5/dist/FileSaver.min.js"></script>
-   <script src="word-export.js?v=20260827_v1222_teacher_pullout_class_layout"></script>
-   <script src="seasonal-schedule.js?v=20261007_v5_seasonal_colors"></script>
-   <script src="seasonal-export.js?v=20261007_v6_seasonal_template"></script>
-   <script src="app.js?v=20261007_v4_seasonal_slots"></script>
-   <script src="app-runtime.js?v=20261007_v4_seasonal_slots"></script>
+<!-- 本地化第三方相依：pizzip 與 file-saver 皆隨專案提供，離線也能匯出 -->
+<script src="assets/pizzip.min.js"></script>
+<script src="assets/FileSaver.min.js"></script>
+<!-- 正式程式碼（js/）與樣式（css/）路徑集中於此，版號統一由 APP_BUILD 控制 -->
+<script src="js/word-export.js?v=20261007_v7_refactor"></script>
+<script src="js/seasonal-schedule.js?v=20261007_v7_refactor"></script>
+<script src="js/seasonal-export.js?v=20261007_v7_refactor"></script>
+<script src="js/app.js?v=20261007_v7_refactor"></script>
+<script src="js/app-runtime.js?v=20261007_v7_refactor"></script>
 </body>
 </html>

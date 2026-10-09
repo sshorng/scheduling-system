@@ -134,8 +134,8 @@ function addEnglish(data, classCode, teacher, weekly) {
 function buildContext(data) {
   const context = createContext();
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync(path.join(root, 'app.js'), 'utf8'), context, { filename: 'app.js' });
-  vm.runInContext(fs.readFileSync(path.join(root, 'app-runtime.js'), 'utf8'), context, { filename: 'app-runtime.js' });
+  vm.runInContext(fs.readFileSync(path.join(root, 'js/app.js'), 'utf8'), context, { filename: 'app.js' });
+  vm.runInContext(fs.readFileSync(path.join(root, 'js/app-runtime.js'), 'utf8'), context, { filename: 'app-runtime.js' });
   context.__inputData = data;
   vm.runInContext(`
     applyData(__inputData);

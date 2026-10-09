@@ -2651,6 +2651,13 @@ function renderClassSelect() {
   if (!sel) return;
   const cur = sel.value;
   sel.innerHTML = '<option value="">— 選擇班級 —</option>';
+  // 單次掃描建立每班非課輔已排數，避免每班各掃一次全表（O(班級×課表) → O(課表+班級)）
+  const scheduledNonHelperByClass = new Map();
+  (state.schedule || []).forEach(entry => {
+    if (isHelperSubjectCode(entry['科目代碼'])) return;
+    const key = String(entry['班級代碼'] || '');
+    scheduledNonHelperByClass.set(key, (scheduledNonHelperByClass.get(key) || 0) + 1);
+  });
   state.classes.forEach(c => {
     const classCode = String(c['班級代碼'] || '');
     const className = c['班級名稱'] || '';
@@ -2660,13 +2667,11 @@ function renderClassSelect() {
     let classTotalWeekly = 0;
     myAssignments.forEach(a => {
       const sub = idx.subjectByCode[a['科目代碼']];
-       if (isHelperSubjectCode(a['科目代碼'])) return;
-       classTotalWeekly += getAssignmentWeeklyValue(a, sub, 3);
+      if (isHelperSubjectCode(a['科目代碼'])) return;
+      classTotalWeekly += getAssignmentWeeklyValue(a, sub, 3);
     });
 
-     const classTotalScheduled = (state.schedule || []).filter(entry =>
-       String(entry['班級代碼'] || '') === classCode && !isHelperSubjectCode(entry['科目代碼'])
-     ).length;
+    const classTotalScheduled = scheduledNonHelperByClass.get(classCode) || 0;
     const classTotalRemaining = Math.max(0, classTotalWeekly - classTotalScheduled);
 
     let label = classCode + (className ? ' ' + className : '');

@@ -6,6 +6,16 @@
 node tests/smoke.cjs
 ```
 
+行為測試（直接執行真正的函式，不做原始碼字串比對）：
+
+```powershell
+node tests/behavior.cjs
+```
+
+本檔透過 `tests/helpers/loader.js` 把整份 `js/app.js` 與 `Code.gs` 載入沙箱
+後實際呼叫，驗證凍結清除判定、單雙週數值、巡堂課輔辨識與後端衝突偵測。
+改名或搬移函式不會讓這些測試靜默失效——載入不到就會直接報錯。
+
 自動排課綁班情境測試：
 
 ```powershell

@@ -4,8 +4,9 @@
   "private": true,
   "description": "國中排課系統：純前端 HTML/CSS/JS ＋ Google Apps Script 後端",
   "scripts": {
-    "test": "node tests/smoke.cjs && node tests/bind-placement.cjs && node tests/bind-lock.cjs",
+    "test": "node tests/smoke.cjs && node tests/behavior.cjs && node tests/bind-placement.cjs && node tests/bind-lock.cjs",
     "test:smoke": "node tests/smoke.cjs",
+    "test:behavior": "node tests/behavior.cjs",
     "test:bind": "node tests/bind-placement.cjs && node tests/bind-lock.cjs",
     "test:live": "node tests/auto-schedule-live-dry-run.cjs",
     "serve": "node -e \"const h=require('http'),f=require('fs'),p=require('path');const t={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document'};h.createServer((q,s)=>{const u=decodeURIComponent(q.url.split('?')[0]);const f2=p.join(process.cwd(),u==='/'?'index.html':u);f.readFile(f2,(e,d)=>{if(e){s.writeHead(404);return s.end('404');}s.writeHead(200,{'Content-Type':t[p.extname(f2)]||'application/octet-stream'});s.end(d);});}).listen(8001,()=>console.log('http://127.0.0.1:8001/'))\""

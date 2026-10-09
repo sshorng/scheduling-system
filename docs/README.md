@@ -64,6 +64,7 @@ npm test
 ```
 
 - `tests/smoke.cjs`：語法檢查、DOM 契約、匯出格式與守衛性斷言
+- `tests/behavior.cjs`：直接執行真正的函式（凍結清除、單雙週、衝突驗證），改名搬移不會靜默失效
 - `tests/bind-placement.cjs`：配課與自動排課的實際排入結果
 - `tests/bind-lock.cjs`：綁班鎖定的原子性
 - `tests/auto-schedule-live-dry-run.cjs`：需真實 GAS 網址，離線會直接退出

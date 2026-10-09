@@ -1780,7 +1780,9 @@ check('Auto-schedule candidate rules are cached', () => {
   const candidateEnd = app.indexOf('// 2.5', slotStart);
   const candidateBlock = app.slice(slotStart, candidateEnd);
   if (!app.slice(autoStart, slotStart).includes('const applicableRuleCache = new Map()')) throw new Error('applicable rule cache missing');
-  if (!app.slice(autoStart, slotStart).includes('const autoTeacherCodesCache = new Map()')) throw new Error('teacher code cache missing');
+  // autoTeacherCodesCache 已提升至頂層（與 getAutoTeacherCodes 同在函式外），不再位於排程主函式切片內；
+  // 快取機制本身仍存在，改為全域檢查以鎖住「有快取」這個效能意圖而非原始碼位置。
+  if (!app.includes('const autoTeacherCodesCache = new Map()')) throw new Error('teacher code cache missing');
   if (!app.slice(autoStart, slotStart).includes('const autoTeacherIdentityCache = new Map()')) throw new Error('teacher identity cache missing');
   if (candidateBlock.includes('state.subjectRules.filter')) throw new Error('candidate evaluation still scans all subject rules');
   if (!app.slice(autoStart, slotStart).includes('idx.schedByTeacherSlot[tk]')) throw new Error('initial teacher-slot lookup is not indexed');

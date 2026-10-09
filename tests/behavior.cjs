@@ -5,6 +5,7 @@
  *  - smoke.cjs 多數斷言是比對原始碼字串，適合防守「有沒有這段程式碼」。
  *  - 本檔直接執行函式，驗證「程式碼跑起來對不對」，不受改名或搬位影響。
  */
+const vm = require('vm');
 const { loadApp, loadBackend } = require('./helpers/loader.js');
 
 const results = [];
@@ -246,6 +247,17 @@ check('載入器能解析關鍵後端函式', () => {
   const required = ['validateScheduleSnapshot_', 'checkConflicts_', 'sheetToObjects_', 'scheduleRevision_'];
   const missing = required.filter(name => typeof backend[name] !== 'function');
   assert(missing.length === 0, '以下後端函式應可取得：' + missing.join(', '));
+});
+
+check('教師代碼解析有快取且結果正確', () => {
+  // 注意：頂層 const 不會掛到沙箱物件上，只能在沙箱內部用程式碼字串呼叫。
+  const ctx = loadApp();
+  const values = vm.runInContext("getAutoTeacherCodes('T01,T02')", ctx);
+  assert(JSON.stringify(values) === '["T01","T02"]', '解析結果錯誤：' + JSON.stringify(values));
+  const hit = vm.runInContext("getAutoTeacherCodes('T01,T02') === getAutoTeacherCodes('T01,T02')", ctx);
+  assert(hit === true, '相同輸入應命中快取回傳同一參照');
+  const objValues = vm.runInContext("getAutoTeacherCodes({'教師姓名':'T03'})", ctx);
+  assert(JSON.stringify(objValues) === '["T03"]', '物件輸入解析錯誤：' + JSON.stringify(objValues));
 });
 
 for (const result of results) {

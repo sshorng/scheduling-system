@@ -7813,6 +7813,35 @@ const parseAutoBindList = value => {
 const getAutoBindSubjects = group => parseAutoBindList(group?.['科目清單'] || group?.['科目代碼']);
 const getAutoBindClasses = group => parseAutoBindList(group?.['班級清單']);
 const getAutoBindMemberKey = (classCode, subjectCode) => String(classCode || '').trim() + '|' + String(subjectCode || '').trim();
+const coreSubjects = new Set(['國文', '數學', '英語', '理化', '生物', '自然', '歷史', '地理', '公民']);
+const activitySubjects = new Set(['體育', '音樂', '視覺藝術', '表演藝術', '家政', '童軍', '資訊科技', '生活科技', '走讀建成生活圈', '文旅享繪', '活力建成']);
+const autoTeacherCodesCache = new Map();
+const autoTeacherCodesObjectCache = new WeakMap();
+const getAutoTeacherCodes = value => {
+  const isObject = value && typeof value === 'object';
+  if (isObject && autoTeacherCodesObjectCache.has(value)) return autoTeacherCodesObjectCache.get(value);
+  const stringKey = isObject ? '' : String(value ?? '');
+  if (!isObject && autoTeacherCodesCache.has(stringKey)) return autoTeacherCodesCache.get(stringKey);
+  const values = Array.isArray(value) ? value : [value];
+  const codes = [];
+  values.forEach(item => {
+    const cell = item && typeof item === 'object' ? item : { '教師姓名': item };
+    const parsed = getCellTeacherCodes(cell);
+    if (parsed.length > 0) {
+      codes.push(...parsed);
+      return;
+    }
+    const fallback = item && typeof item === 'object' ? item['教師姓名'] : item;
+    String(fallback || '').split(/[,，、;；]/).forEach(token => {
+      const code = String(token || '').trim();
+      if (code) codes.push(code);
+    });
+  });
+  const result = [...new Set(codes)];
+  if (isObject) autoTeacherCodesObjectCache.set(value, result);
+  else autoTeacherCodesCache.set(stringKey, result);
+  return result;
+};
 async function executeAutoScheduleCore(runOptions = {}) {
   const previewOnly = runOptions.previewOnly === true;
   const getAutoScheduleIdentity = entry => {
@@ -8045,35 +8074,6 @@ async function executeAutoScheduleCore(runOptions = {}) {
     autoEndPeriod   = 8;
   }
 
-  const coreSubjects = new Set(['國文', '數學', '英語', '理化', '生物', '自然', '歷史', '地理', '公民']);
-  const activitySubjects = new Set(['體育', '音樂', '視覺藝術', '表演藝術', '家政', '童軍', '資訊科技', '生活科技', '走讀建成生活圈', '文旅享繪', '活力建成']);
-  const autoTeacherCodesCache = new Map();
-  const autoTeacherCodesObjectCache = new WeakMap();
-  const getAutoTeacherCodes = value => {
-    const isObject = value && typeof value === 'object';
-    if (isObject && autoTeacherCodesObjectCache.has(value)) return autoTeacherCodesObjectCache.get(value);
-    const stringKey = isObject ? '' : String(value ?? '');
-    if (!isObject && autoTeacherCodesCache.has(stringKey)) return autoTeacherCodesCache.get(stringKey);
-    const values = Array.isArray(value) ? value : [value];
-    const codes = [];
-    values.forEach(item => {
-      const cell = item && typeof item === 'object' ? item : { '教師姓名': item };
-      const parsed = getCellTeacherCodes(cell);
-      if (parsed.length > 0) {
-        codes.push(...parsed);
-        return;
-      }
-      const fallback = item && typeof item === 'object' ? item['教師姓名'] : item;
-      String(fallback || '').split(/[,，、;；]/).forEach(token => {
-        const code = String(token || '').trim();
-        if (code) codes.push(code);
-      });
-    });
-    const result = [...new Set(codes)];
-    if (isObject) autoTeacherCodesObjectCache.set(value, result);
-    else autoTeacherCodesCache.set(stringKey, result);
-    return result;
-  };
   const autoTeacherIdentityCache = new Map();
   const resolveAutoTeacherCodes = value => {
     const codes = getAutoTeacherCodes(value);

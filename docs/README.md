@@ -4,6 +4,72 @@
 
 ---
 
+## 快速開始
+
+本機預覽與測試（不需設定資料庫）：
+
+```bash
+npm run serve       # http://127.0.0.1:8001/
+npm test            # 跑完三支離線測試
+npm run test:live   # 需先設定 SCHEDULING_TEST_GAS_URL，會實際呼叫 GAS
+```
+
+部署後端：把 `Code.gs` 的內容貼到 Google Apps Script 編輯器，部署成 Web App
+（執行身分為自己、Who has access 設為 Anyone），再把網址填入 `js/app.js` 的
+`DEFAULT_GAS_URL`，或於首頁輸入後存入 `localStorage`。
+
+### 目錄結構
+
+| 路徑 | 說明 |
+|------|------|
+| `index.html` | 單頁入口，內含全部靜態 DOM 與 `?v=` 版號 |
+| `Code.gs` | GAS 後端（唯一需要貼上 Apps Script 的檔案） |
+| `js/app.js` | 主程式：課表渲染、拖曳、衝突偵測、自動排課引擎 |
+| `js/app-runtime.js` | 啟動時擴充 `buildIndex` 等核心索引的附加層 |
+| `js/word-export.js` | Word 課表匯出 |
+| `js/seasonal-schedule.js` | 寒暑輔日期課表 |
+| `js/seasonal-export.js` | 寒暑輔 Excel 匯出 |
+| `css/style.css` | 全站樣式 |
+| `assets/` | pizzip、FileSaver 與各種匯出範本 |
+| `tests/` | 離線測試（Node 直接執行） |
+| `tools/` | 一次性報表產生器等附加工具 |
+| `docs/` | 本文件與需求規格草稿 |
+
+> `js/` 內的檔案共用同一份全域 `state` 與 `idx`，載入順序有意義，
+> 請勿任意更動 `index.html` 的 `script` 順序。
+
+### 後端 API
+
+前端一律以 `POST` 呼叫 `Code.gs` 的 `doPost`，以 `action` 區分路由，
+回應統一為 `{ ok: true, data }` 或 `{ ok: false, error }`。
+`LockService` 保護下列寫入動作，並以 `__requestId` 做冪等重試：
+
+| 類別 | action |
+|------|--------|
+| 讀取 | `getAll`、`validateScheduleSnapshot` |
+| 單格寫入 | `updateCell`、`clearCell`、`swapCells`、`lockCell`、`setOvertime` |
+| 批次寫入 | `batchUpdateSchedule`、`batchSetOvertime` |
+| 主資料 | `saveMeta`、`deleteMeta`、`renameTeacher`、`saveTeacherBlock`、`saveSubjectRule`、`saveSubjectRelation`、`saveTeacherExclusive` |
+| 巡堂 | `savePatrolSchedule`、`exportPatrolSchedule` |
+| 寒暑輔 | `saveSeasonalBundle` |
+| 匯出 | `exportSchedule`、`exportTeachers` |
+| 維護 | `ensureSchema`、`initDatabase`、`verifyAdmin` |
+
+> 後端目前**未做呼叫端身分驗證**，僅適合個人或受信任網路環境使用。
+
+### 測試
+
+```bash
+npm test
+```
+
+- `tests/smoke.cjs`：語法檢查、DOM 契約、匯出格式與守衛性斷言
+- `tests/bind-placement.cjs`：配課與自動排課的實際排入結果
+- `tests/bind-lock.cjs`：綁班鎖定的原子性
+- `tests/auto-schedule-live-dry-run.cjs`：需真實 GAS 網址，離線會直接退出
+
+修改任何 `js/*.js` 或 `Code.gs` 後，請先跑 `npm test` 再部署。
+
 ## 一、專案狀態（2026-08-23 最新進度）
 
 ### 🟢 已經完成的功能
@@ -52,7 +118,7 @@
    - 在 `Code.gs` 擴充「教室」資料表，並在前端加入第三維度的課表檢視畫面，同時在拖曳與自動排課時驗證專科教室（如理化實驗室、電腦教室）衝堂。
 2. **部署 GAS v1191 並端到端測試**：
       - 需將 `Code.gs` 部署為 `20260823_v1191_preplanned_course`，再於實際 GAS Web App 測試配課 `課程屬性＝預排`、預排課程不列入教師鐘點、自動超鐘點分散選擇、網頁淡色標示、Word 灰色字體、schema 移除舊預排欄位，以及既有的 `validateScheduleSnapshot`、綁班整組鎖定、整批寫回、單雙週衝堂與教師課表聚焦。
-     - 完整模式若回傳 `INFEASIBLE`，前端會列出逐項診斷結果，並可逐步選擇限制重試。
+     - （原 CP-SAT 求解器已移除，排課引擎現為純前端 MRV 啟發式，無 `INFEASIBLE` 模式。）
      - 部分模式會在硬限制下優先排入可行課程，將 `unassignedLessons` 列出供人工接手，不會因少數課程無法安排而整份消失。
 12. **自動排課既有連堂豁免（v1174）**：
      - 一般自動排課只把本次新增課程納入教師連堂硬稽核；排課前已存在的課表列不參與這一項檢查。

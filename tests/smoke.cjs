@@ -3804,5 +3804,51 @@ check('Seasonal Excel exports valid Open XML layout and both timetable views', (
     if (!html.includes('id="' + id + '"')) throw new Error('寒暑輔介面缺少：' + id);
   }
 });
+check('Teacher block lookup index matches linear scan', () => {
+  const start = backend.indexOf('function parseTeacherBlockPairs_');
+  const end = backend.indexOf('function saveTeacherBlock_', start);
+  const helpers = backend.slice(start, end);
+  const ctx = { module: { exports: {} }, exports: {} };
+  vm.createContext(ctx);
+  vm.runInContext(helpers + '\nmodule.exports = { parseTeacherBlockPairs_, teacherBlockHasSlot_ };', ctx,
+    { filename: 'teacher-block-helpers.js' });
+  const { parseTeacherBlockPairs_, teacherBlockHasSlot_ } = ctx.module.exports;
+  const blocks = [
+    { '教師姓名': 'T01', '時段': '1-2,3-4' },
+    { '教師姓名': 'T02', '時段': '5-6' },
+    { '教師姓名': '', '時段': '1-1' }
+  ];
+  const index = new Map();
+  blocks.forEach(block => {
+    const code = String(block['教師姓名']);
+    if (!index.has(code)) index.set(code, new Set());
+    const slotSet = index.get(code);
+    parseTeacherBlockPairs_(block['時段']).forEach(pair => slotSet.add(pair));
+  });
+  for (const teacherCode of ['T01', 'T02', '', 'T03', undefined, '  T01  ']) {
+    for (let day = 1; day <= 5; day++) {
+      for (let period = 1; period <= 8; period++) {
+        const viaScan = blocks.some(block => teacherBlockHasSlot_(block, teacherCode, day, period));
+        const slotSet = index.get(String(teacherCode));
+        const viaIndex = !!(slotSet && slotSet.has(day + '-' + period));
+        if (viaScan !== viaIndex) {
+          throw new Error(`教師不排課索引與線性掃描不一致：${String(teacherCode)} ${day}-${period}`);
+        }
+      }
+    }
+  }
+  if (!backend.includes('blockSlotSetByTeacher.get(String(teacherCode))')) {
+    throw new Error('validateScheduleSnapshot_ 未改用教師不排課索引');
+  }
+  if (backend.includes('teacherBlocks.some(block => teacherBlockHasSlot_')) {
+    throw new Error('validateScheduleSnapshot_ 仍有每列全表掃描的不排課檢查');
+  }
+  if (!backend.includes('assignmentsByClassSubject.get(classCode')) {
+    throw new Error('validateScheduleSnapshot_ 未改用配課索引');
+  }
+  if (!backend.includes('matchingRulesCache.get(ruleMatchKey)')) {
+    throw new Error('validateScheduleSnapshot_ 未快取科目規則比對結果');
+  }
+});
 for (const result of results) console.log(`${result.ok ? 'PASS' : 'FAIL'}  ${result.name}${result.error ? `: ${result.error}` : ''}`);
 if (results.some(result => !result.ok)) process.exitCode = 1;

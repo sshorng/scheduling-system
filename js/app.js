@@ -7004,8 +7004,20 @@ function togglePeriodSlots(per) {
 
 // ============================================================
 function renderStatsTab() {
+  // 單次掃描課表建立統計索引，避免原本「每位教師 × 每班各掃一次全表」的 O(人數×課表數) 成本
+  const cntByTeacher = new Map();
+  const cntByClass = new Map();
+  let filledSlots = 0;
+  state.schedule.forEach(entry => {
+    if (isPatrolScheduleEntry(entry)) return;
+    filledSlots++;
+    const teacherKey = String(entry['教師姓名']);
+    cntByTeacher.set(teacherKey, (cntByTeacher.get(teacherKey) || 0) + 1);
+    const classKey = String(entry['班級代碼']);
+    cntByClass.set(classKey, (cntByClass.get(classKey) || 0) + 1);
+  });
+
   const totalSlots  = state.classes.length * 5 * 8;
-  const filledSlots = state.schedule.filter(entry => !isPatrolScheduleEntry(entry)).length;
   const totalTeachers = state.teachers.length;
   const totalClasses  = state.classes.length;
 
@@ -7019,14 +7031,13 @@ function renderStatsTab() {
 
   // 教師統計
   const tbody = document.getElementById('stats-teacher-tbody');
-  tbody.innerHTML = '';
-  state.teachers.forEach(t => {
+  const teacherRows = state.teachers.map(t => {
     const code    = t['教師姓名'];
-    const cnt     = state.schedule.filter(s => String(s['教師姓名'])===String(code) && !isPatrolScheduleEntry(s)).length;
+    const cnt     = cntByTeacher.get(String(code)) || 0;
     const base    = parseInt(t['基本鐘點']||'0',10);
     const pct     = base > 0 ? Math.round(cnt/base*100) : 0;
     const barColor = pct < 80 ? 'var(--warning)' : pct > 110 ? 'var(--danger)' : 'var(--success)';
-    tbody.innerHTML += '<tr>'+
+    return '<tr>'+
       '<td>'+esc((t['教師姓名'] || t['姓名']))+'</td>'+
       '<td>'+cnt+'</td>'+
       '<td>'+base+'</td>'+
@@ -7035,20 +7046,21 @@ function renderStatsTab() {
         '<span class="text-muted" style="font-size:11px;margin-left:6px;">'+pct+'%</span></td>'+
       '</tr>';
   });
+  tbody.innerHTML = teacherRows.join('');
 
   // 班級統計
   const ctbody = document.getElementById('stats-class-tbody');
-  ctbody.innerHTML = '';
-  state.classes.forEach(c => {
+  const classRows = state.classes.map(c => {
     const code = c['班級代碼'];
-    const filled = state.schedule.filter(s => String(s['班級代碼'])===String(code) && !isPatrolScheduleEntry(s)).length;
+    const filled = cntByClass.get(String(code)) || 0;
     const empty  = Math.max(0, 5*8 - filled);
-    ctbody.innerHTML += '<tr>'+
+    return '<tr>'+
       '<td>'+esc(c['班級名稱']||code)+'</td>'+
       '<td>'+filled+'</td>'+
       '<td><span class="badge '+(empty===0?'badge-green':'badge-yellow')+'">'+empty+'</span></td>'+
       '</tr>';
   });
+  ctbody.innerHTML = classRows.join('');
 }
 
 async function doExport() {

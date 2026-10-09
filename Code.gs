@@ -2862,6 +2862,31 @@ function validateScheduleSnapshot_(schedule, data) {
   subjects.forEach(row => { subjectByCode[String(row['科目代碼'] || '').trim()] = row; });
   rooms.forEach(row => { roomByCode[String(row['教室代碼'] || '').trim()] = row; });
 
+  // ===== 查詢索引（一次建置，取代每列課表的全表掃描）=====
+  // 1) assignmentsByClassSubject：取代每列的 assignments.find（O(N×A) → O(N+A)）
+  const assignmentsByClassSubject = new Map();
+  assignments.forEach(assignment => {
+    const key = String(assignment['班級代碼'] || '').trim() + '|' + String(assignment['科目代碼'] || '').trim();
+    if (!assignmentsByClassSubject.has(key)) assignmentsByClassSubject.set(key, []);
+    assignmentsByClassSubject.get(key).push(assignment);
+  });
+  // 2) blockSlotSetByTeacher：取代每列每教師的 teacherBlocks.some（O(N×T×B) → O(N+T+B)）
+  const blockSlotSetByTeacher = new Map();
+  teacherBlocks.forEach(block => {
+    const code = String(block['教師姓名']);
+    if (!blockSlotSetByTeacher.has(code)) blockSlotSetByTeacher.set(code, new Set());
+    const slotSet = blockSlotSetByTeacher.get(code);
+    parseTeacherBlockPairs_(block['時段']).forEach(pair => slotSet.add(pair));
+  });
+  // 3) frozenRuleSlotsMemo：快取 parseFrozenRuleSlots_ 結果（同一條規則不再重複解析字串）
+  const frozenRuleSlotsMemo = new Map();
+  const frozenRuleSlotsOf = rule => {
+    if (!frozenRuleSlotsMemo.has(rule)) frozenRuleSlotsMemo.set(rule, parseFrozenRuleSlots_(rule));
+    return frozenRuleSlotsMemo.get(rule);
+  };
+  // 4) matchingRulesCache：同一班級＋科目的規則比對結果只算一次
+  const matchingRulesCache = new Map();
+
   const errors = [];
   const addError = message => {
     if (errors.indexOf(message) < 0) errors.push(message);
@@ -2898,7 +2923,8 @@ function validateScheduleSnapshot_(schedule, data) {
     const day = parseInt(row['星期'], 10);
     const period = parseInt(row['節次'], 10);
     const teacherCodes = teacherCodesFromValue_(row['教師姓名']);
-    const alternateAssignment = assignments.find(assignment =>
+    const rowAssignments = assignmentsByClassSubject.get(classCode + '|' + subjectCode) || [];
+    const alternateAssignment = rowAssignments.find(assignment =>
       scheduleMatchesAssignment_(row, assignment) && assignmentIsAlternateWeek_(assignment, subjectByCode)
     );
     if (id) {
@@ -2964,7 +2990,8 @@ function validateScheduleSnapshot_(schedule, data) {
             row
         });
       }
-      if (teacherBlocks.some(block => teacherBlockHasSlot_(block, teacherCode, day, period))) {
+      const blockedSlotSet = blockSlotSetByTeacher.get(String(teacherCode));
+      if (blockedSlotSet && blockedSlotSet.has(day + '-' + period)) {
         addManualConstraintError('教師不排課違規：' + teacherCode + ' 星期' + day + '第' + period + '節');
       }
     });
@@ -2989,15 +3016,20 @@ function validateScheduleSnapshot_(schedule, data) {
     }
 
     if (!isPatrol) {
-      const matchingRules = subjectRules.filter(rule => subjectRuleMatches_(rule, subjectCode, classCode, classes));
+      const ruleMatchKey = classCode + '|' + subjectCode;
+      let matchingRules = matchingRulesCache.get(ruleMatchKey);
+      if (matchingRules === undefined) {
+        matchingRules = subjectRules.filter(rule => subjectRuleMatches_(rule, subjectCode, classCode, classes));
+        matchingRulesCache.set(ruleMatchKey, matchingRules);
+      }
       const banned = matchingRules.some(rule =>
         String(rule['規則類型'] || '').trim() === '禁排' &&
-        parseFrozenRuleSlots_(rule).some(slot => slot.day === day && slot.period === period)
+        frozenRuleSlotsOf(rule).some(slot => slot.day === day && slot.period === period)
       );
       if (banned) addError('科目禁排違規：' + subjectCode + '（' + classCode + '）');
       const mandatoryRules = matchingRules.filter(rule => String(rule['規則類型'] || '').trim() === '必排');
       if (mandatoryRules.length > 0 && !mandatoryRules.some(rule =>
-        parseFrozenRuleSlots_(rule).some(slot => slot.day === day && slot.period === period)
+        frozenRuleSlotsOf(rule).some(slot => slot.day === day && slot.period === period)
        )) addManualConstraintError('科目必排違規：' + subjectCode + '（' + classCode + '）');
     }
   });

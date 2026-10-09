@@ -2,7 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const root = path.resolve(__dirname, '..');
-const read = name => fs.readFileSync(path.join(root, name), 'utf8');
+// 統一換行符號：簽出時可能是 CRLF（Windows）也可能是 LF，
+// 但測試標記是以 \n 撰寫，先正規化才能讓 indexOf 穩定命中。
+const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
 const app = read('js/app.js');
 const runtime = read('js/app-runtime.js');
 const wordExport = read('js/word-export.js');

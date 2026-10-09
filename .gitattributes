@@ -1,0 +1,14 @@
+# 統一行尾，避免 CRLF/LF 造成測試與工具差異
+# 程式碼與測試一律以 LF 存放與簽出
+* text=auto eol=lf
+
+# 二進位檔案不做行尾轉換
+*.docx binary
+*.xlsx binary
+*.gsheet binary
+*.woff2 binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary

@@ -7794,6 +7794,25 @@ const getAutoEntryWeekTypes = entry => {
   return autoAlternateWeekTypes.includes(attr) ? [attr] : autoAlternateWeekTypes;
 };
 const hasWeekOverlap = (entry, weekType) => getAutoEntryWeekTypes(entry).includes(weekType);
+const autoTeacherInput = lesson => lesson.teacherCodes?.length ? lesson.teacherCodes : lesson.teacherCode;
+const getAutoClassGrade = classCode => {
+  const cls = idx.classByCode[String(classCode)] || null;
+  return String(cls?.['年級'] || String(classCode || '').charAt(0)).trim();
+};
+const getSubjectRoomCode = subjectCode => String(idx.subjectByCode[String(subjectCode)]?.['所屬教室代碼'] || '').trim();
+const getSubjectRoomCapacity = subjectCode => {
+  const roomCode = getSubjectRoomCode(subjectCode);
+  const room = roomCode ? idx.roomByCode[roomCode] : null;
+  return Math.max(1, parseInt(room?.['容量'] || '1', 10) || 1);
+};
+const parseAutoBindList = value => {
+  if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
+  if (typeof value === 'number') return String(value).match(/.{3}/g) || [];
+  return String(value || '').split(/[,，、;；]/).map(item => item.trim()).filter(Boolean);
+};
+const getAutoBindSubjects = group => parseAutoBindList(group?.['科目清單'] || group?.['科目代碼']);
+const getAutoBindClasses = group => parseAutoBindList(group?.['班級清單']);
+const getAutoBindMemberKey = (classCode, subjectCode) => String(classCode || '').trim() + '|' + String(subjectCode || '').trim();
 async function executeAutoScheduleCore(runOptions = {}) {
   const previewOnly = runOptions.previewOnly === true;
   const getAutoScheduleIdentity = entry => {
@@ -8095,11 +8114,6 @@ async function executeAutoScheduleCore(runOptions = {}) {
     const teacher = identities.map(code => idx.teacherByCode[code]).find(Boolean);
     return teacher ? String(teacher['教師姓名'] || teacher['姓名'] || identities[0] || '') : String(identities[0] || '');
   };
-  const autoTeacherInput = lesson => lesson.teacherCodes?.length ? lesson.teacherCodes : lesson.teacherCode;
-  const getAutoClassGrade = classCode => {
-    const cls = idx.classByCode[String(classCode)] || null;
-    return String(cls?.['年級'] || String(classCode || '').charAt(0)).trim();
-  };
   const autoTeacherValue = lesson => {
     if (lesson.teacherValue !== undefined) return lesson.teacherValue;
     const codes = getAutoTeacherCodes(lesson.teacherCode);
@@ -8124,22 +8138,8 @@ async function executeAutoScheduleCore(runOptions = {}) {
     addAutoTeacherExclusivePeers(teacherA, teacherB);
     addAutoTeacherExclusivePeers(teacherB, teacherA);
   });
-  const getSubjectRoomCode = subjectCode => String(idx.subjectByCode[String(subjectCode)]?.['所屬教室代碼'] || '').trim();
-  const getSubjectRoomCapacity = subjectCode => {
-    const roomCode = getSubjectRoomCode(subjectCode);
-    const room = roomCode ? idx.roomByCode[roomCode] : null;
-    return Math.max(1, parseInt(room?.['容量'] || '1', 10) || 1);
-  };
   const weeklyTargetByClassSubject = new Map();
-  const parseAutoBindList = value => {
-    if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
-    if (typeof value === 'number') return String(value).match(/.{3}/g) || [];
-    return String(value || '').split(/[,，、;；]/).map(item => item.trim()).filter(Boolean);
-  };
-  const getAutoBindSubjects = group => parseAutoBindList(group?.['科目清單'] || group?.['科目代碼']);
-  const getAutoBindClasses = group => parseAutoBindList(group?.['班級清單']);
   const getAutoBindMembers = group => getConfiguredBindMembersForRun(group);
-  const getAutoBindMemberKey = (classCode, subjectCode) => String(classCode || '').trim() + '|' + String(subjectCode || '').trim();
   const activeAssignments = (state.assignments || []).filter(assignment => !isPreplannedCourse(assignment['課程屬性']));
   const assignmentWeeklyByClassSubject = buildAutoAssignmentWeeklyIndex(activeAssignments, idx.subjectByCode);
   const expandAutoBindGroupCohorts = group => {

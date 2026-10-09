@@ -7781,6 +7781,19 @@ function closeAutoScheduleModal() {
   document.getElementById('__autoModal').classList.remove('show');
 }
 
+// ============================================================
+// 自動排課共用純函式（自 executeAutoScheduleCore 提升至頂層）
+// 這些函式不依賴閉包狀態，可獨立測試；內部呼叫點不需修改。
+// ============================================================
+const parsePriorityTokens = value => [...new Set(String(value || '').split(/[,，、;；\n]/).map(token => token.trim()).filter(Boolean))];
+const autoAlternateWeekTypes = ['單週', '雙週'];
+const getAutoEntryWeekTypes = entry => {
+  const period = parseInt(entry?.['節次'], 10);
+  const attr = String(entry?.['課堂屬性'] || '').trim();
+  if (period !== 8) return ['全週'];
+  return autoAlternateWeekTypes.includes(attr) ? [attr] : autoAlternateWeekTypes;
+};
+const hasWeekOverlap = (entry, weekType) => getAutoEntryWeekTypes(entry).includes(weekType);
 async function executeAutoScheduleCore(runOptions = {}) {
   const previewOnly = runOptions.previewOnly === true;
   const getAutoScheduleIdentity = entry => {
@@ -7935,7 +7948,6 @@ async function executeAutoScheduleCore(runOptions = {}) {
   const optP8Only         = document.getElementById('auto-opt-p8-only')?.checked ?? false;
   const priorityTeacherInput = String(document.getElementById('auto-priority-teachers')?.value || '').trim();
   const prioritySubjectInput = String(document.getElementById('auto-priority-subjects')?.value || '').trim();
-  const parsePriorityTokens = value => [...new Set(String(value || '').split(/[,，、;；\n]/).map(token => token.trim()).filter(Boolean))];
   const priorityTeacherTokens = new Set(parsePriorityTokens(priorityTeacherInput));
   const prioritySubjectTokens = new Set(parsePriorityTokens(prioritySubjectInput));
   try {
@@ -8826,13 +8838,6 @@ async function executeAutoScheduleCore(runOptions = {}) {
      return scheduleLookup;
   }
 
-  const autoAlternateWeekTypes = ['單週', '雙週'];
-  const getAutoEntryWeekTypes = entry => {
-    const period = parseInt(entry?.['節次'], 10);
-    const attr = String(entry?.['課堂屬性'] || '').trim();
-    if (period !== 8) return ['全週'];
-    return autoAlternateWeekTypes.includes(attr) ? [attr] : autoAlternateWeekTypes;
-  };
   const selectAutoPlacementWeekType = (classCode, subjectCode, teacherValue, day, period, targetSched = localSchedule, scheduleLookup = null) => {
     if (parseInt(period, 10) !== 8) return '全週';
     const lookup = scheduleLookup || buildScheduleLookup(targetSched);
@@ -8965,7 +8970,6 @@ async function executeAutoScheduleCore(runOptions = {}) {
       ? (explicitWeekType || selectAutoPlacementWeekType(clsCode, subCode, tcCode, day, period, targetSched, scheduleLookup))
       : '';
     const targetWeekTypes = period === 8 ? (targetWeekType ? [targetWeekType] : autoAlternateWeekTypes) : ['全週'];
-    const hasWeekOverlap = (entry, weekType) => getAutoEntryWeekTypes(entry).includes(weekType);
 
     const occupied = targetWeekTypes.some(weekType => scheduleLookup
       ? scheduleLookup.classWeekSlots.has(String(clsCode) + '|' + day + '|' + period + '|' + weekType)

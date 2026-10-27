@@ -1111,6 +1111,46 @@ async function batchClearSeasonalSelectedSlots() {
   }
 }
 
+function seasonalClearScope(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const lockedCount = list.filter(row => seasonalIsTrue(row['是否鎖定'])).length;
+  return { total: list.length, lockedCount, clearCount: list.length - lockedCount };
+}
+
+function seasonalKeepOnClearTimetable(row, sessionId) {
+  return seasonalText(row['場次ID']) !== sessionId || seasonalIsTrue(row['是否鎖定']);
+}
+
+async function clearSeasonalTimetable() {
+  const session = seasonalActiveSession();
+  if (!session) {
+    toast('請先建立或選擇寒暑輔場次。', 'warning');
+    return;
+  }
+  const scope = seasonalClearScope(seasonalActiveRows('seasonalSchedule'));
+  const lockedCount = scope.lockedCount;
+  const clearCount = scope.clearCount;
+  if (!clearCount) {
+    showModal('清除課表', lockedCount
+      ? '目前課表只剩 ' + lockedCount + ' 格鎖定課程，沒有可清除的格位。'
+      : '目前課表沒有已排入的課程。', 'info');
+    return;
+  }
+  const sessionName = seasonalText(session['活動名稱']) || '未命名場次';
+  const lockedNote = lockedCount ? '<br>🔒 另有 ' + lockedCount + ' 格鎖定課程會保留。' : '';
+  const confirmed = await showModal('清除課表',
+    '將清除「' + esc(sessionName) + '」共 ' + clearCount + ' 格未鎖定課程。' + lockedNote +
+    '<br><br>清除後可重新用「🤖 自動排課」排入，需要留底請先匯出 Excel。',
+    'confirm', '確認清除', '取消');
+  if (!confirmed) return;
+  state.seasonalSchedule = (state.seasonalSchedule || []).filter(row => seasonalKeepOnClearTimetable(row, seasonalActiveSessionId));
+  clearSeasonalSelectedSlots();
+  renderSeasonalTimetable();
+  if (await seasonalPersistActive()) {
+    toast('已清除 ' + clearCount + ' 格課程' + (lockedCount ? '，保留 ' + lockedCount + ' 格鎖定課程' : '') + '。', 'success');
+  }
+}
+
 function bindSeasonalSlotButton(button) {
   button.addEventListener('click', (event) => {
     if (seasonalSuppressSeasonalClick) {

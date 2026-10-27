@@ -3854,5 +3854,39 @@ check('Teacher block lookup index matches linear scan', () => {
     throw new Error('validateScheduleSnapshot_ 未快取科目規則比對結果');
   }
 });
+check('Seasonal clear timetable removes only unlocked slots and keeps locked ones', () => {
+  if (!html.includes('onclick="clearSeasonalTimetable()"')) throw new Error('寒暑輔日期課表缺少清除課表按鈕');
+  const context = { window: {} };
+  context.window = context;
+  context.state = {
+    seasonalSessions: [{ '場次ID': 'S1', '活動名稱': '115 暑輔' }, { '場次ID': 'S2', '活動名稱': '他場次' }],
+    seasonalSchedule: [
+      { '課表ID': 'A', '場次ID': 'S1', '班級代碼': '901', '日期': '2026-07-21', '節次': '2', '是否鎖定': 'FALSE' },
+      { '課表ID': 'B', '場次ID': 'S1', '班級代碼': '901', '日期': '2026-07-21', '節次': '3', '是否鎖定': 'TRUE' },
+      { '課表ID': 'C', '場次ID': 'S2', '班級代碼': '901', '日期': '2026-07-21', '節次': '2', '是否鎖定': 'FALSE' }
+    ]
+  };
+  vm.createContext(context);
+  const probe = [
+    "seasonalActiveSessionId = 'S1';",
+    "const __scopeProbe = seasonalClearScope(seasonalActiveRows('seasonalSchedule'));",
+    "const __keepProbe = state.seasonalSchedule.filter(row => seasonalKeepOnClearTimetable(row, 'S1')).map(row => row['課表ID']).sort().join(',');",
+    "const __survivorProbe = state.seasonalSchedule.filter(row => seasonalKeepOnClearTimetable(row, seasonalActiveSessionId)).map(row => row['課表ID']).sort().join(',');",
+    "globalThis.__clearProbe = { scope: __scopeProbe, kept: __keepProbe, survivors: __survivorProbe };"
+  ].join('\n');
+  vm.runInContext(seasonal + '\n' + probe, context, { filename: 'seasonal-clear.js' });
+  const result = context.__clearProbe;
+  if (!result || result.scope.total !== 2 || result.scope.lockedCount !== 1 || result.scope.clearCount !== 1) {
+    throw new Error('清除課表範圍統計錯誤：' + JSON.stringify(result && result.scope));
+  }
+  if (result.kept !== 'B,C' || result.survivors !== 'B,C') {
+    throw new Error('清除課表未保留鎖定格或其他場次：' + result.kept + '／' + result.survivors);
+  }
+  const start = seasonal.indexOf('async function clearSeasonalTimetable');
+  const body = seasonal.slice(start, seasonal.indexOf('function bindSeasonalSlotButton', start));
+  for (const marker of ['確認清除', 'clearSeasonalSelectedSlots()', 'renderSeasonalTimetable()', 'await seasonalPersistActive()']) {
+    if (!body.includes(marker)) throw new Error('清除課表缺少流程步驟：' + marker);
+  }
+});
 for (const result of results) console.log(`${result.ok ? 'PASS' : 'FAIL'}  ${result.name}${result.error ? `: ${result.error}` : ''}`);
 if (results.some(result => !result.ok)) process.exitCode = 1;

@@ -159,17 +159,22 @@
     .seasonal-empty-inline { padding: 30px; color: var(--muted); text-align: center; font-size: 13px; }
     /* 寒暑輔停排：沿用「教師不排課」的選取卡與摘要卡 */
     .seasonal-block-picker-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
-    .seasonal-block-picker-tools { display: flex; align-items: center; gap: 10px; }
+    .seasonal-block-picker-tools { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+    #seasonal-block-teacher-count { white-space: nowrap; }
     .seasonal-block-picker-tools input { width: 190px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
     #seasonal-block-teachers { max-height: 132px; margin-bottom: 4px; }
-    .seasonal-block-workbench.constraint-workbench { grid-template-columns: minmax(380px, 1.05fr) minmax(340px, 1fr); gap: 18px; align-items: start; }
-    .seasonal-block-workbench .constraint-list-scroll { max-height: 360px; }
+    .seasonal-block-panel { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+    .seasonal-block-panel .constraint-reason { max-width: 100%; margin-top: 0; }
+    .seasonal-block-panel .constraint-inline-summary { margin-top: 0; }
+    .seasonal-block-panel .constraint-actions { margin-top: 0; }
+    #seasonal-block-grid { max-height: 340px; }
     .seasonal-block-cell.is-selected { border-style: solid; border-color: #7c6ee6; background: #ede9fe; color: #4c1d95; }
     .seasonal-block-cell.is-blocked.is-selected { border-color: #7c6ee6; box-shadow: 0 0 0 2px #ddd6fe inset; }
     .seasonal-block-date-head:hover, .seasonal-block-day-head:hover { background: #eef2ff; }
-    .seasonal-block-current .constraint-list-scroll { max-height: 380px; }
+    .seasonal-block-current { margin-top: 18px; padding: 12px 14px 14px; border: 1px solid #d9dff0; border-radius: 12px; background: linear-gradient(180deg, #fbfcff, #f7f9fd); }
+    .seasonal-block-current-title { margin-bottom: 9px; color: #34415d; font-size: 13px; font-weight: 700; }
     .seasonal-block-current-count { margin-left: 8px; color: var(--muted); font-size: 11px; font-weight: 500; }
-    .seasonal-block-list { display: flex; flex-direction: column; gap: 7px; padding: 8px; }
+    .seasonal-block-list { display: flex; flex-direction: column; gap: 7px; }
     .seasonal-block-item { padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; background: #fff; }
     .seasonal-block-item.is-editing { border-color: #7c6ee6; background: #fbfaff; box-shadow: 0 0 0 1px #ddd6fe inset; }
     .seasonal-block-item-head { display: flex; align-items: center; gap: 7px; }

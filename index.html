@@ -916,29 +916,25 @@
               </div>
             </div>
             <div id="seasonal-block-teachers" class="teacher-picker"></div>
-            <div class="constraint-workbench seasonal-block-workbench">
-              <section class="constraint-editor-panel">
-                <div class="constraint-slot-heading">
-                  <span class="text-sm font-bold">點選要停排的日期與節次（可多選）：</span>
-                  <span id="seasonal-block-editing-notice" class="block-editing-notice" hidden></span>
-                </div>
-                <div id="seasonal-block-grid" class="seasonal-timetable-scroll"></div>
-                <div class="form-group constraint-reason">
-                  <label for="seasonal-block-reason">原因標注（選填）</label>
-                  <input id="seasonal-block-reason" type="text" placeholder="例：週三下午進修">
-                </div>
-                <div id="seasonal-block-selection-summary" class="constraint-inline-summary">請先勾選教師，再點選日期 × 節次格位。</div>
-                <div class="flex gap-2 constraint-actions">
-                  <button id="seasonal-block-apply-btn" class="btn btn-danger btn-sm" type="button" onclick="applySeasonalBlock(false)">⛔ 設定停排</button>
-                  <button id="seasonal-block-clear-btn" class="btn btn-ghost btn-sm" type="button" onclick="applySeasonalBlock(true)">✅ 清除停排</button>
-                </div>
-              </section>
-              <aside class="constraint-current-card seasonal-block-current">
-                <div class="constraint-current-title">目前停排設定<span id="seasonal-block-current-count" class="seasonal-block-current-count"></span></div>
-                <div class="constraint-list-scroll">
-                  <div id="seasonal-blocks-body" class="seasonal-block-list"></div>
-                </div>
-              </aside>
+            <div class="seasonal-block-panel">
+              <div class="constraint-slot-heading">
+                <span class="text-sm font-bold">點選要停排的日期與節次（可多選）：</span>
+                <span id="seasonal-block-editing-notice" class="block-editing-notice" hidden></span>
+              </div>
+              <div id="seasonal-block-grid" class="seasonal-timetable-scroll"></div>
+              <div class="form-group constraint-reason">
+                <label for="seasonal-block-reason">原因標注（選填）</label>
+                <input id="seasonal-block-reason" type="text" placeholder="例：週三下午進修">
+              </div>
+              <div id="seasonal-block-selection-summary" class="constraint-inline-summary">請先勾選教師，再點選日期 × 節次格位。</div>
+              <div class="flex gap-2 constraint-actions">
+                <button id="seasonal-block-apply-btn" class="btn btn-danger btn-sm" type="button" onclick="applySeasonalBlock(false)">⛔ 設定停排</button>
+                <button id="seasonal-block-clear-btn" class="btn btn-ghost btn-sm" type="button" onclick="applySeasonalBlock(true)">✅ 清除停排</button>
+              </div>
+            </div>
+            <div class="seasonal-block-current">
+              <div class="seasonal-block-current-title">目前停排設定<span id="seasonal-block-current-count" class="seasonal-block-current-count"></span></div>
+              <div id="seasonal-blocks-body" class="seasonal-block-list"></div>
             </div>
             </div>
           </section>

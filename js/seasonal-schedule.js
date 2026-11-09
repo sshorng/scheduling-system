@@ -820,17 +820,12 @@ let seasonalBlockPendingSlots = new Set();
 let seasonalBlockEditingTeacher = '';
 
 function seasonalBlockTeacherCodes() {
+  // 只列本場次需求名單中的教師（已設定停排的也留著，否則舊設定會點不到）。
   const codes = new Set([
-    ...(state.teachers || []).map(teacher => seasonalText(teacher['教師姓名'] || teacher['姓名'])),
     ...seasonalActiveRows('seasonalNeeds').map(row => seasonalText(row['教師姓名'])),
     ...seasonalActiveRows('seasonalTeacherBlocks').map(row => seasonalText(row['教師姓名']))
   ].filter(Boolean));
-  const order = new Map((state.teachers || []).map((teacher, index) => [seasonalText(teacher['教師姓名'] || teacher['姓名']), index]));
-  return [...codes].sort((a, b) => {
-    const ai = order.has(a) ? order.get(a) : Number.MAX_SAFE_INTEGER;
-    const bi = order.has(b) ? order.get(b) : Number.MAX_SAFE_INTEGER;
-    return ai - bi || a.localeCompare(b, 'zh-Hant');
-  });
+  return [...codes].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
 }
 
 function seasonalBlockRowsOf(teacher, blocks) {
@@ -896,8 +891,14 @@ function seasonalRenderBlockTeachers() {
   const wrap = document.getElementById('seasonal-block-teachers');
   if (!wrap) return;
   const blocks = seasonalActiveRows('seasonalTeacherBlocks');
+  const allCodes = seasonalBlockTeacherCodes();
+  if (!allCodes.length) {
+    wrap.innerHTML = '<div class="seasonal-empty-inline">本場次還沒有課程需求。請先在第 2 段新增需求，需求名單中的教師才會出現在這裡。</div>';
+    seasonalUpdateBlockTeacherCount();
+    return;
+  }
   const keyword = seasonalText(document.getElementById('seasonal-block-teacher-search')?.value).toLowerCase();
-  const codes = seasonalBlockTeacherCodes().filter(code => !keyword || code.toLowerCase().includes(keyword));
+  const codes = allCodes.filter(code => !keyword || code.toLowerCase().includes(keyword));
   if (!codes.length) {
     wrap.innerHTML = '<div class="seasonal-empty-inline">沒有符合的教師。</div>';
     seasonalUpdateBlockTeacherCount();

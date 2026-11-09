@@ -687,34 +687,71 @@ async function saveSeasonalSetup() {
 }
 
 
+function seasonalSetNeedModalMode(mode, title, saveLabel) {
+  const titleEl = document.getElementById('seasonal-edit-need-title');
+  if (titleEl) titleEl.textContent = title;
+  const saveBtn = document.getElementById('seasonal-edit-need-save');
+  if (saveBtn) saveBtn.textContent = saveLabel;
+  const modeEl = document.getElementById('seasonal-edit-need-mode');
+  if (modeEl) modeEl.value = mode;
+  const delBtn = document.getElementById('seasonal-edit-need-delete');
+  if (delBtn) delBtn.hidden = mode !== 'edit';
+}
+
+function seasonalFillEditNeedClassOptions(selected) {
+  const classSelect = document.getElementById('seasonal-edit-need-class');
+  if (!classSelect) return;
+  classSelect.innerHTML = seasonalGetGrade9Classes().map(row => {
+    const code = seasonalText(row['班級代碼']);
+    const name = row['班級名稱'] ? ' ' + row['班級名稱'] : '';
+    return '<option value="' + esc(code) + '">' + esc(code + name) + '</option>';
+  }).join('');
+  if (selected) classSelect.value = selected;
+}
+
 function openSeasonalEditNeedModal(needId) {
   const need = (state.seasonalNeeds || []).find(row => seasonalText(row['需求ID']) === seasonalText(needId));
   if (!need) return;
+  seasonalSetNeedModalMode('edit', '編輯課程需求', '儲存修改');
   document.getElementById('seasonal-edit-need-id').value = needId;
-  const classSelect = document.getElementById('seasonal-edit-need-class');
-  if (classSelect) {
-    const classes = seasonalGetGrade9Classes();
-    classSelect.innerHTML = classes.map(row => {
-      const code = seasonalText(row['班級代碼']);
-      const name = row['班級名稱'] ? ' ' + row['班級名稱'] : '';
-      return '<option value="' + esc(code) + '">' + esc(code + name) + '</option>';
-    }).join('');
-    classSelect.value = seasonalText(need['班級代碼']);
-  }
+  seasonalFillEditNeedClassOptions(seasonalText(need['班級代碼']));
   document.getElementById('seasonal-edit-need-subject').value = need['科目代碼'] || '';
   document.getElementById('seasonal-edit-need-teacher').value = need['教師姓名'] || '';
   document.getElementById('seasonal-edit-need-count').value = need['本期節數'] || '1';
   document.getElementById('seasonal-edit-need-modal')?.classList.add('show');
 }
 
+// 空白格點擊：帶入班級與科目，補上教師與節數即可。
+function seasonalOpenAddNeedModal(classCode, subject) {
+  seasonalSetNeedModalMode('add', '新增課程需求', '新增需求');
+  document.getElementById('seasonal-edit-need-id').value = '';
+  seasonalFillEditNeedClassOptions(classCode || '');
+  document.getElementById('seasonal-edit-need-subject').value = subject || '';
+  document.getElementById('seasonal-edit-need-teacher').value = '';
+  document.getElementById('seasonal-edit-need-count').value = '1';
+  document.getElementById('seasonal-edit-need-modal')?.classList.add('show');
+  setTimeout(() => document.getElementById('seasonal-edit-need-teacher')?.focus(), 60);
+}
+
 function closeSeasonalEditNeedModal() {
   document.getElementById('seasonal-edit-need-modal')?.classList.remove('show');
 }
 
+async function deleteSeasonalNeedById(needId) {
+  const id = seasonalText(needId);
+  if (!id) return;
+  state.seasonalNeeds = (state.seasonalNeeds || []).filter(row => seasonalText(row['需求ID']) !== id);
+  closeSeasonalEditNeedModal();
+  seasonalRenderNeeds();
+  seasonalFillSubjectOptions();
+  await seasonalPersistActive();
+  renderSeasonalTimetable();
+  toast('課程需求已刪除。', 'success');
+}
+
 async function saveSeasonalEditNeed() {
+  const mode = seasonalText(document.getElementById('seasonal-edit-need-mode')?.value) || 'edit';
   const needId = seasonalText(document.getElementById('seasonal-edit-need-id').value);
-  const need = (state.seasonalNeeds || []).find(row => seasonalText(row['需求ID']) === needId);
-  if (!need) return;
   const classCode = seasonalText(document.getElementById('seasonal-edit-need-class').value);
   const subject = seasonalText(document.getElementById('seasonal-edit-need-subject').value);
   const teacher = seasonalText(document.getElementById('seasonal-edit-need-teacher').value);
@@ -723,13 +760,30 @@ async function saveSeasonalEditNeed() {
     toast('請填妥班級、科目、教師與正整數節數。', 'warning');
     return;
   }
+  if (mode === 'add') {
+    state.seasonalNeeds = [...(state.seasonalNeeds || []), {
+      '需求ID': seasonalNewId('NEED'), '場次ID': seasonalActiveSessionId, '班級代碼': classCode,
+      '科目代碼': subject, '教師姓名': teacher, '本期節數': String(count)
+    }];
+    closeSeasonalEditNeedModal();
+    seasonalRenderNeeds();
+    seasonalFillTeacherOptions();
+    seasonalFillSubjectOptions();
+    seasonalPopulateViewSelect();
+    await seasonalPersistActive();
+    renderSeasonalTimetable();
+    toast('課程需求已新增。', 'success');
+    return;
+  }
+  const need = (state.seasonalNeeds || []).find(row => seasonalText(row['需求ID']) === needId);
+  if (!need) return;
   need['班級代碼'] = classCode;
   need['科目代碼'] = subject;
   need['教師姓名'] = teacher;
   need['本期節數'] = String(count);
   delete need['起始週'];
   delete need['結束週'];
-  
+
   if (Array.isArray(state.seasonalSchedule)) {
     state.seasonalSchedule.forEach(row => {
       if (seasonalText(row['需求ID']) === needId && seasonalText(row['場次ID']) === seasonalActiveSessionId) {
@@ -739,7 +793,7 @@ async function saveSeasonalEditNeed() {
       }
     });
   }
-  
+
   closeSeasonalEditNeedModal();
   seasonalRenderNeeds();
   seasonalFillTeacherOptions();
@@ -750,28 +804,87 @@ async function saveSeasonalEditNeed() {
   toast('課程需求已更新。', 'success');
 }
 
+function seasonalNeedClassColumns(grade9, rows) {
+  const order = new Map(grade9.map((row, index) => [seasonalText(row['班級代碼']), index]));
+  const codes = new Set([...order.keys(), ...rows.map(row => seasonalText(row['班級代碼']))].filter(Boolean));
+  return [...codes].sort((a, b) => {
+    const ai = order.has(a) ? order.get(a) : Number.MAX_SAFE_INTEGER;
+    const bi = order.has(b) ? order.get(b) : Number.MAX_SAFE_INTEGER;
+    return ai - bi || a.localeCompare(b, 'zh-Hant');
+  });
+}
+
+function seasonalNeedSubjectColumns(rows) {
+  const seen = new Map();
+  rows.forEach(row => {
+    const subject = seasonalText(row['科目代碼']);
+    if (subject && !seen.has(subject)) seen.set(subject, true);
+  });
+  return [...seen.keys()].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+}
+
+function seasonalUpdateNeedsSummary(classes, subjects, rows, emptyCells) {
+  const el = document.getElementById('seasonal-needs-summary');
+  if (!el) return;
+  if (!classes.length) {
+    el.textContent = '查無九年級班級資料';
+    return;
+  }
+  const missing = emptyCells ? '，未配 ' + emptyCells + ' 格' : '';
+  el.textContent = classes.length + ' 班 · ' + subjects.length + ' 科 · ' + rows.length + ' 筆需求' + missing;
+}
+
+// 配課矩陣：列為班級、欄為科目，格子放該班該科的教師與節數，點格即改。
 function seasonalRenderNeeds() {
   const body = document.getElementById('seasonal-needs-body');
   if (!body) return;
   const rows = seasonalActiveRows('seasonalNeeds');
-  body.innerHTML = rows.length ? rows.map(row => '<tr><td>' + esc(row['班級代碼']) + '</td><td>' + esc(row['科目代碼']) + '</td><td>' + esc(row['教師姓名']) +
-    '</td><td>' + esc(row['本期節數']) +
-    '</td><td><div style="display:flex;gap:4px;justify-content:center;">' +
-    '<button class="btn btn-primary btn-xs" data-edit-need="' + esc(row['需求ID']) + '" type="button">編輯</button>' +
-    '<button class="btn btn-ghost btn-xs text-danger" data-delete-need="' + esc(row['需求ID']) + '" type="button">刪除</button>' +
-    '</div></td></tr>').join('') :
-    '<tr><td colspan="5" class="text-center text-muted">尚未設定課程需求</td></tr>';
-  body.querySelectorAll('[data-edit-need]').forEach(button => button.addEventListener('click', () => {
-    openSeasonalEditNeedModal(button.dataset.editNeed);
-  }));
-  body.querySelectorAll('[data-delete-need]').forEach(button => button.addEventListener('click', async () => {
-    const id = button.dataset.deleteNeed;
-    state.seasonalNeeds = (state.seasonalNeeds || []).filter(row => seasonalText(row['需求ID']) !== id);
-    seasonalRenderNeeds();
-    seasonalFillSubjectOptions();
-    await seasonalPersistActive();
-    renderSeasonalTimetable();
-  }));
+  const classes = seasonalNeedClassColumns(seasonalGetGrade9Classes(), rows);
+  const subjects = seasonalNeedSubjectColumns(rows);
+  if (!classes.length) {
+    body.innerHTML = '<div class="needs-matrix-empty">查無九年級班級資料，請先到設定頁建立班級。</div>';
+    seasonalUpdateNeedsSummary([], [], rows, 0);
+    return;
+  }
+  if (!subjects.length) {
+    body.innerHTML = '<div class="needs-matrix-empty">還沒有任何課程需求。點右上角「＋ 科目」開始配課。</div>';
+    seasonalUpdateNeedsSummary(classes, [], rows, 0);
+    return;
+  }
+  const index = new Map();
+  rows.forEach(row => {
+    const key = seasonalText(row['班級代碼']) + '\u0000' + seasonalText(row['科目代碼']);
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push(row);
+  });
+  let emptyCells = 0;
+  const head = '<thead><tr><th class="needs-matrix-corner">班級</th>' +
+    subjects.map(subject => '<th>' + esc(subject) + '</th>').join('') + '</tr></thead>';
+  const tableRows = classes.map(code => {
+    const cells = subjects.map(subject => {
+      const cellRows = index.get(code + '\u0000' + subject) || [];
+      if (!cellRows.length) {
+        emptyCells += 1;
+        return '<td class="needs-matrix-cell is-empty">' +
+          '<button class="needs-cell-add" type="button" data-add-need-class="' + esc(code) + '" data-add-need-subject="' + esc(subject) +
+          '" title="新增 ' + esc(code + ' ' + subject) + '">＋</button></td>';
+      }
+      const items = cellRows.map(row =>
+        '<button class="needs-cell-body" type="button" data-edit-need="' + esc(row['需求ID']) + '" title="編輯 ' + esc(seasonalText(row['教師姓名'])) + '">' +
+        '<span class="needs-cell-teacher">' + esc(seasonalText(row['教師姓名'])) + '</span>' +
+        '<span class="needs-cell-count">' + esc(seasonalText(row['本期節數'])) + ' 節</span></button>').join('');
+      return '<td class="needs-matrix-cell has-need' + (cellRows.length > 1 ? ' is-multi' : '') + '">' + items + '</td>';
+    }).join('');
+    return '<tr><th scope="row">' + esc(code) + '</th>' + cells + '</tr>';
+  }).join('');
+  body.innerHTML = '<table class="needs-matrix">' + head + '<tbody>' + tableRows + '</tbody></table>';
+  seasonalUpdateNeedsSummary(classes, subjects, rows, emptyCells);
+  body.querySelectorAll('[data-edit-need]').forEach(button => {
+    button.addEventListener('click', () => openSeasonalEditNeedModal(button.dataset.editNeed));
+  });
+  body.querySelectorAll('[data-add-need-class]').forEach(button => {
+    button.addEventListener('click', () => seasonalOpenAddNeedModal(button.dataset.addNeedClass, button.dataset.addNeedSubject));
+  });
 }
 
 async function addSeasonalNeed() {

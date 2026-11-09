@@ -884,24 +884,34 @@
           <section class="panel-card">
             <div class="seasonal-section-heading"><div><span class="seasonal-step">2</span><strong>班級課程需求</strong></div><button class="btn btn-ghost btn-xs seasonal-section-toggle" type="button" data-seasonal-section-toggle="needs" aria-expanded="true" aria-controls="seasonal-needs-section-body" onclick="seasonalToggleSeasonalSection('needs')">收合</button></div>
             <div id="seasonal-needs-section-body" data-seasonal-section-body="needs">
-            <div class="seasonal-form-grid">
-              <div class="form-group seasonal-classes-picker-group" style="grid-column: 1 / -1;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                  <label style="margin-bottom:0; font-weight:700;">班級（只開九年級，可多選）</label>
-                  <div style="display:flex; gap:6px;">
-                    <button type="button" class="btn btn-ghost btn-xs" onclick="seasonalToggleAllNeedClasses(true)">全選九年級</button>
-                    <button type="button" class="btn btn-ghost btn-xs" onclick="seasonalToggleAllNeedClasses(false)">全部取消</button>
-                  </div>
-                </div>
-                <div id="seasonal-need-classes-container" class="seasonal-need-classes-container"></div>
-                <select id="seasonal-need-class" style="display:none;"></select>
-              </div>
-              <div class="form-group"><label for="seasonal-need-subject">科目</label><input id="seasonal-need-subject" type="text" list="seasonal-subject-options" placeholder="例：生物"><datalist id="seasonal-subject-options"></datalist></div>
-              <div class="form-group"><label for="seasonal-need-teacher">教師</label><input id="seasonal-need-teacher" type="text" list="seasonal-teacher-options" placeholder="選擇或輸入教師"><datalist id="seasonal-teacher-options"></datalist></div>
-              <div class="form-group"><label for="seasonal-need-count">本期節數</label><input id="seasonal-need-count" type="number" min="1" step="1" value="1"></div>
+            <div class="needs-matrix-toolbar">
+              <div id="seasonal-needs-summary" class="needs-matrix-summary">載入配課資料中…</div>
+              <button class="btn btn-primary btn-xs" type="button" onclick="seasonalOpenAddNeedModal('', '')">＋ 科目</button>
             </div>
-            <div class="flex justify-end" style="margin:8px 0 12px;"><button class="btn btn-primary btn-sm" type="button" onclick="addSeasonalNeed()">＋ 新增需求</button></div>
-            <div class="seasonal-table-scroll"><table class="data-table compact-table"><thead><tr><th>班級</th><th>科目</th><th>教師</th><th>節數</th><th></th></tr></thead><tbody id="seasonal-needs-body"></tbody></table></div>
+            <div class="needs-matrix-legend"><span class="needs-matrix-swatch is-assigned"></span>已配課<span class="needs-matrix-swatch is-empty"></span>未配（點空格即可新增）</div>
+            <div id="seasonal-needs-body" class="needs-matrix-scroll"></div>
+            <details class="needs-batch">
+              <summary>批次新增多班（勾選班級，一次套用同一科目與教師）</summary>
+              <div class="seasonal-form-grid">
+                <div class="form-group seasonal-classes-picker-group" style="grid-column: 1 / -1;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <label style="margin-bottom:0; font-weight:700;">班級（只開九年級，可多選）</label>
+                    <div style="display:flex; gap:6px;">
+                      <button type="button" class="btn btn-ghost btn-xs" onclick="seasonalToggleAllNeedClasses(true)">全選九年級</button>
+                      <button type="button" class="btn btn-ghost btn-xs" onclick="seasonalToggleAllNeedClasses(false)">全部取消</button>
+                    </div>
+                  </div>
+                  <div id="seasonal-need-classes-container" class="seasonal-need-classes-container"></div>
+                  <select id="seasonal-need-class" style="display:none;"></select>
+                </div>
+                <div class="form-group"><label for="seasonal-need-subject">科目</label><input id="seasonal-need-subject" type="text" list="seasonal-subject-options" placeholder="例：生物"></div>
+                <div class="form-group"><label for="seasonal-need-teacher">教師</label><input id="seasonal-need-teacher" type="text" list="seasonal-teacher-options" placeholder="選擇或輸入教師"></div>
+                <div class="form-group"><label for="seasonal-need-count">本期節數</label><input id="seasonal-need-count" type="number" min="1" step="1" value="1"></div>
+              </div>
+              <div class="flex justify-end" style="margin:10px 0 0;"><button class="btn btn-primary btn-sm" type="button" onclick="addSeasonalNeed()">＋ 新增需求</button></div>
+            </details>
+            <datalist id="seasonal-subject-options"></datalist>
+            <datalist id="seasonal-teacher-options"></datalist>
             </div>
           </section>
 
@@ -1027,8 +1037,9 @@
 <!-- 寒暑輔編輯需求 Modal -->
 <div class="modal-overlay" id="seasonal-edit-need-modal">
   <div class="modal-card seasonal-assign-modal-card">
-    <div class="modal-title">編輯課程需求</div>
+    <div class="modal-title" id="seasonal-edit-need-title">編輯課程需求</div>
     <input id="seasonal-edit-need-id" type="hidden">
+    <input id="seasonal-edit-need-mode" type="hidden" value="edit">
     <div class="form-group" style="margin-top:10px;">
       <label for="seasonal-edit-need-class">班級</label>
       <select id="seasonal-edit-need-class"></select>
@@ -1045,9 +1056,11 @@
       <label for="seasonal-edit-need-count">本期節數</label>
       <input id="seasonal-edit-need-count" type="number" min="1" step="1" value="1">
     </div>
-    <div class="modal-actions" style="margin-top:16px;">
+    <div class="modal-actions" style="margin-top:16px;align-items:center;">
+      <button id="seasonal-edit-need-delete" class="btn btn-ghost text-danger" type="button" hidden onclick="deleteSeasonalNeedById(document.getElementById('seasonal-edit-need-id').value)">刪除此筆</button>
+      <span style="flex:1 1 auto;"></span>
       <button class="btn btn-ghost" type="button" onclick="closeSeasonalEditNeedModal()">取消</button>
-      <button class="btn btn-primary" type="button" onclick="saveSeasonalEditNeed()">儲存修改</button>
+      <button id="seasonal-edit-need-save" class="btn btn-primary" type="button" onclick="saveSeasonalEditNeed()">儲存修改</button>
     </div>
   </div>
 </div>

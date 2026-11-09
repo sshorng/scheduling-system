@@ -53,3 +53,9 @@ node tests/auto-schedule-live-dry-run.cjs
 ```powershell
 node tests/bind-lock.cjs
 ```
+
+寒暑輔配課矩陣測試（班級 × 科目矩陣的渲染、空白格新增、編輯與刪除）：
+
+```powershell
+node tests/seasonal-needs-matrix.cjs
+```

@@ -856,8 +856,15 @@ function seasonalCompressPeriods(periods) {
   return '第' + groups.map(group => group[0] + (group[1] === group[0] ? '' : '~' + group[1])).join('、') + '節';
 }
 
-// 把停排時段壓成「01/21(週三) 第3~5節、01/22(週四) 第3~5節」，避免一節一列。
-function seasonalBlockSummarize(slots) {
+// 停排摘要用短日期（01/21(三)），長字串在右側卡片不會被擠成三行。
+function seasonalBlockShortDate(value) {
+  const date = seasonalIso(value);
+  if (!date) return '';
+  const weekday = ['日', '一', '二', '三', '四', '五', '六'][new Date(date + 'T00:00:00Z').getUTCDay()];
+  return date.slice(5).replace('-', '/') + '(' + weekday + ')';
+}
+
+function seasonalBlockDateGroups(slots) {
   const byDate = new Map();
   (slots || []).forEach(slot => {
     const date = seasonalIso(slot && slot.date);
@@ -866,9 +873,16 @@ function seasonalBlockSummarize(slots) {
     if (!byDate.has(date)) byDate.set(date, []);
     byDate.get(date).push(period);
   });
-  return [...byDate.keys()].sort().map(date =>
-    seasonalDisplayDate(date) + ' ' + seasonalCompressPeriods(byDate.get(date))
-  ).join('、');
+  return [...byDate.keys()].sort().map(date => ({
+    date,
+    label: seasonalBlockShortDate(date),
+    periods: seasonalCompressPeriods(byDate.get(date))
+  }));
+}
+
+// 把停排時段壓成「01/21(三) 第3~5節、01/22(四) 第3~5節」，避免一節一列。
+function seasonalBlockSummarize(slots) {
+  return seasonalBlockDateGroups(slots).map(group => group.label + ' ' + group.periods).join('、');
 }
 
 function seasonalUpdateBlockTeacherCount() {
@@ -1027,8 +1041,10 @@ function seasonalRenderBlockTable() {
     if (!grouped.has(code)) grouped.set(code, []);
     grouped.get(code).push(row);
   });
+  const countEl = document.getElementById('seasonal-block-current-count');
   if (!grouped.size) {
-    body.innerHTML = '<tr><td colspan="4" class="text-center text-muted">尚未設定教師停排時段</td></tr>';
+    body.innerHTML = '<div class="seasonal-block-empty">尚未設定教師停排時段</div>';
+    if (countEl) countEl.textContent = '';
     return;
   }
   const order = new Map(seasonalBlockTeacherCodes().map((code, index) => [code, index]));
@@ -1036,17 +1052,23 @@ function seasonalRenderBlockTable() {
     (order.has(a) ? order.get(a) : Number.MAX_SAFE_INTEGER) - (order.has(b) ? order.get(b) : Number.MAX_SAFE_INTEGER));
   body.innerHTML = codes.map(code => {
     const rows = grouped.get(code);
-    const slots = seasonalBlockSummarize(seasonalBlockSlotsOf(rows));
-    const reasons = [...new Set(rows.map(row => seasonalText(row['原因'])).filter(Boolean))].join('、') || '—';
-    return '<tr><td><button type="button" class="block-teacher-link" data-edit-block-teacher="' + esc(code) + '" title="點選可帶入此教師的停排設定">' + esc(code) + '</button>' +
-      '<small class="seasonal-block-teacher-meta">' + rows.length + ' 節</small></td>' +
-      '<td class="seasonal-block-slot-text" title="' + esc(slots) + '">' + esc(slots) + '</td>' +
-      '<td>' + esc(reasons) + '</td>' +
-      '<td><div class="flex gap-1">' +
-      '<button class="btn btn-ghost btn-xs" type="button" data-edit-block-teacher="' + esc(code) + '">✏️ 編輯</button>' +
-      '<button class="btn btn-danger btn-xs" type="button" data-delete-block-teacher="' + esc(code) + '">🗑 刪除</button>' +
-      '</div></td></tr>';
+    const chips = seasonalBlockDateGroups(seasonalBlockSlotsOf(rows)).map(group =>
+      '<span class="seasonal-block-item-chip">' + esc(group.label + ' ' + group.periods) + '</span>').join('');
+    const reasons = [...new Set(rows.map(row => seasonalText(row['原因'])).filter(Boolean))].join('、');
+    const editing = code === seasonalBlockEditingTeacher;
+    return '<div class="seasonal-block-item' + (editing ? ' is-editing' : '') + '">' +
+      '<div class="seasonal-block-item-head">' +
+      '<button type="button" class="block-teacher-link" data-edit-block-teacher="' + esc(code) + '" title="點選可帶入此教師的停排設定">' + esc(code) + '</button>' +
+      '<span class="seasonal-block-item-meta">' + rows.length + ' 節</span>' +
+      '<span class="seasonal-block-item-actions">' +
+      '<button class="btn btn-ghost btn-xs" type="button" data-edit-block-teacher="' + esc(code) + '" title="帶入設定編輯">✏️</button>' +
+      '<button class="btn btn-danger btn-xs" type="button" data-delete-block-teacher="' + esc(code) + '" title="清除此教師全部停排">🗑</button>' +
+      '</span></div>' +
+      '<div class="seasonal-block-item-chips">' + chips + '</div>' +
+      (reasons ? '<div class="seasonal-block-item-reason">原因：' + esc(reasons) + '</div>' : '') +
+      '</div>';
   }).join('');
+  if (countEl) countEl.textContent = codes.length + ' 位';
   body.querySelectorAll('[data-edit-block-teacher]').forEach(button => {
     button.addEventListener('click', () => editSeasonalBlockTeacher(button.dataset.editBlockTeacher));
   });

@@ -933,13 +933,10 @@
                   <button id="seasonal-block-clear-btn" class="btn btn-ghost btn-sm" type="button" onclick="applySeasonalBlock(true)">✅ 清除停排</button>
                 </div>
               </section>
-              <aside class="constraint-current-card">
-                <div class="constraint-current-title">目前停排設定</div>
+              <aside class="constraint-current-card seasonal-block-current">
+                <div class="constraint-current-title">目前停排設定<span id="seasonal-block-current-count" class="seasonal-block-current-count"></span></div>
                 <div class="constraint-list-scroll">
-                  <table class="data-table" id="seasonal-block-table">
-                    <thead><tr><th>教師</th><th>停排時段</th><th>原因</th><th>操作</th></tr></thead>
-                    <tbody id="seasonal-blocks-body"></tbody>
-                  </table>
+                  <div id="seasonal-blocks-body" class="seasonal-block-list"></div>
                 </div>
               </aside>
             </div>

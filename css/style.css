@@ -157,6 +157,24 @@
     .seasonal-block-cell:hover { border-color: #fca5a5; background: #fef2f2; }
     .seasonal-block-cell.is-blocked { border-style: solid; border-color: #ef4444; background: #fee2e2; color: #b91c1c; font-weight: 700; }
     .seasonal-empty-inline { padding: 30px; color: var(--muted); text-align: center; font-size: 13px; }
+    /* 寒暑輔停排：沿用「教師不排課」的選取卡與摘要卡 */
+    .seasonal-block-picker-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+    .seasonal-block-picker-tools { display: flex; align-items: center; gap: 10px; }
+    .seasonal-block-picker-tools input { width: 190px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+    #seasonal-block-teachers { max-height: 132px; margin-bottom: 4px; }
+    .seasonal-block-workbench { grid-template-columns: minmax(340px, 1fr) minmax(400px, 1.1fr); gap: 18px; }
+    .seasonal-block-workbench .constraint-list-scroll { max-height: 360px; }
+    .seasonal-block-cell.is-selected { border-style: solid; border-color: #7c6ee6; background: #ede9fe; color: #4c1d95; }
+    .seasonal-block-cell.is-blocked.is-selected { border-color: #7c6ee6; box-shadow: 0 0 0 2px #ddd6fe inset; }
+    .seasonal-block-date-head:hover, .seasonal-block-day-head:hover { background: #eef2ff; }
+    #seasonal-block-table { min-width: 460px; }
+    #seasonal-block-table th:nth-child(1), #seasonal-block-table td:nth-child(1) { width: 22%; }
+    #seasonal-block-table th:nth-child(2), #seasonal-block-table td:nth-child(2) { width: 36%; }
+    #seasonal-block-table th:nth-child(3), #seasonal-block-table td:nth-child(3) { width: 12%; }
+    #seasonal-block-table th:nth-child(4), #seasonal-block-table td:nth-child(4) { width: 30%; }
+    #seasonal-block-table td:last-child .flex { flex-wrap: nowrap; white-space: nowrap; }
+    #seasonal-block-table .seasonal-block-slot-text { color: var(--ink); font-size: 12px; line-height: 1.6; }
+    #seasonal-block-table .seasonal-block-teacher-meta { display: block; color: var(--muted); font-size: 11px; }
     .seasonal-assign-modal-card { max-width: 460px; }
     .seasonal-assign-modal-card .form-group { margin: 12px 0; }
     .seasonal-assign-modal-card input { width: 100%; }

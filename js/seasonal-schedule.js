@@ -521,16 +521,14 @@ function initSeasonalModule() {
   seasonalInitialized = true;
   document.getElementById('seasonal-session-select')?.addEventListener('change', event => {
     seasonalActiveSessionId = event.target.value;
+    seasonalBlockPendingSlots = new Set();
+    seasonalBlockEditingTeacher = '';
     renderSeasonalWorkspace();
   });
   document.getElementById('seasonal-view-mode')?.addEventListener('change', () => {
     seasonalPopulateViewSelect();
     renderSeasonalTimetable();
   });
-  const blockTeacherInput = document.getElementById('seasonal-block-teacher');
-  if (blockTeacherInput) {
-    blockTeacherInput.addEventListener('input', () => seasonalRenderTeacherBlockGrid());
-  }
 }
 
 function createSeasonalSession() {
@@ -815,32 +813,138 @@ async function addSeasonalNeed() {
   toast('已成功為 ' + selectedClasses.length + ' 個班級新增課程需求。', 'success');
 }
 
-function seasonalRenderTeacherBlocks() {
-  seasonalRenderTeacherBlockGrid();
-  const body = document.getElementById('seasonal-blocks-body');
-  if (!body) return;
-  const rows = seasonalActiveRows('seasonalTeacherBlocks').slice().sort((a, b) =>
-    seasonalText(a['教師姓名']).localeCompare(seasonalText(b['教師姓名']), 'zh-Hant') ||
-    seasonalIso(a['日期']).localeCompare(seasonalIso(b['日期'])) ||
-    Number(a['節次']) - Number(b['節次']));
-  body.innerHTML = rows.length ? rows.map(row => '<tr><td>' + esc(row['教師姓名']) + '</td><td>' + esc(seasonalDisplayDate(row['日期'])) +
-    '</td><td>第' + esc(row['節次']) + '節</td><td>' + esc(row['原因'] || '') +
-    '</td><td><button class="btn btn-ghost btn-xs" data-delete-block="' + esc(row['記錄ID']) + '" type="button">刪除</button></td></tr>').join('') :
-    '<tr><td colspan="5" class="text-center text-muted">尚未設定教師停排時段</td></tr>';
-  body.querySelectorAll('[data-delete-block]').forEach(button => button.addEventListener('click', async () => {
-    state.seasonalTeacherBlocks = (state.seasonalTeacherBlocks || []).filter(row => seasonalText(row['記錄ID']) !== button.dataset.deleteBlock);
-    seasonalRenderTeacherBlocks();
-    await seasonalPersistActive();
-    renderSeasonalTimetable();
-  }));
+/* ===== 寒暑輔教師停排：改用「教師不排課」的勾選卡＋日期×節次工作台 ===== */
+const SEASONAL_BLOCK_PERIODS = [1, 2, 3, 4, 5];
+let seasonalBlockSelectedTeachers = new Set();
+let seasonalBlockPendingSlots = new Set();
+let seasonalBlockEditingTeacher = '';
+
+function seasonalBlockTeacherCodes() {
+  const codes = new Set([
+    ...(state.teachers || []).map(teacher => seasonalText(teacher['教師姓名'] || teacher['姓名'])),
+    ...seasonalActiveRows('seasonalNeeds').map(row => seasonalText(row['教師姓名'])),
+    ...seasonalActiveRows('seasonalTeacherBlocks').map(row => seasonalText(row['教師姓名']))
+  ].filter(Boolean));
+  const order = new Map((state.teachers || []).map((teacher, index) => [seasonalText(teacher['教師姓名'] || teacher['姓名']), index]));
+  return [...codes].sort((a, b) => {
+    const ai = order.has(a) ? order.get(a) : Number.MAX_SAFE_INTEGER;
+    const bi = order.has(b) ? order.get(b) : Number.MAX_SAFE_INTEGER;
+    return ai - bi || a.localeCompare(b, 'zh-Hant');
+  });
+}
+
+function seasonalBlockRowsOf(teacher, blocks) {
+  const name = seasonalText(teacher);
+  if (!name) return [];
+  return (blocks || seasonalActiveRows('seasonalTeacherBlocks'))
+    .filter(row => seasonalText(row['教師姓名']) === name);
+}
+
+function seasonalBlockSlotsOf(rows) {
+  return (rows || []).map(row => ({ date: row['日期'], period: row['節次'] }));
+}
+
+function seasonalCompressPeriods(periods) {
+  const nums = [...new Set((periods || []).map(Number).filter(num => Number.isInteger(num) && num > 0))].sort((a, b) => a - b);
+  const groups = [];
+  nums.forEach(num => {
+    const last = groups[groups.length - 1];
+    if (last && num === last[1] + 1) last[1] = num;
+    else groups.push([num, num]);
+  });
+  if (!groups.length) return '';
+  return '第' + groups.map(group => group[0] + (group[1] === group[0] ? '' : '~' + group[1])).join('、') + '節';
+}
+
+// 把停排時段壓成「01/21(週三) 第3~5節、01/22(週四) 第3~5節」，避免一節一列。
+function seasonalBlockSummarize(slots) {
+  const byDate = new Map();
+  (slots || []).forEach(slot => {
+    const date = seasonalIso(slot && slot.date);
+    const period = Number(slot && slot.period);
+    if (!date || !Number.isInteger(period)) return;
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date).push(period);
+  });
+  return [...byDate.keys()].sort().map(date =>
+    seasonalDisplayDate(date) + ' ' + seasonalCompressPeriods(byDate.get(date))
+  ).join('、');
+}
+
+function seasonalUpdateBlockTeacherCount() {
+  const el = document.getElementById('seasonal-block-teacher-count');
+  if (!el) return;
+  const count = seasonalBlockSelectedTeachers.size;
+  el.textContent = count ? '已勾選 ' + count + ' 位教師' : '尚未勾選教師';
+}
+
+function seasonalRenderBlockTeachers() {
+  const wrap = document.getElementById('seasonal-block-teachers');
+  if (!wrap) return;
+  const blocks = seasonalActiveRows('seasonalTeacherBlocks');
+  const keyword = seasonalText(document.getElementById('seasonal-block-teacher-search')?.value).toLowerCase();
+  const codes = seasonalBlockTeacherCodes().filter(code => !keyword || code.toLowerCase().includes(keyword));
+  if (!codes.length) {
+    wrap.innerHTML = '<div class="seasonal-empty-inline">沒有符合的教師。</div>';
+    seasonalUpdateBlockTeacherCount();
+    return;
+  }
+  wrap.innerHTML = codes.map(code => {
+    const rows = seasonalBlockRowsOf(code, blocks);
+    const checked = seasonalBlockSelectedTeachers.has(code);
+    const summary = rows.length ? seasonalBlockSummarize(seasonalBlockSlotsOf(rows)) : '';
+    const title = code + (rows.length ? '｜已停排：' + summary : '｜尚未設定停排');
+    return '<label class="teacher-pick-item' + (rows.length ? ' has-block' : '') + '" title="' + esc(title) + '">' +
+      '<input type="checkbox" value="' + esc(code) + '"' + (checked ? ' checked' : '') + '>' +
+      '<span class="teacher-pick-name">' + esc(code) + '</span>' +
+      (rows.length ? '<span class="teacher-pick-tag">' + rows.length + '節</span>' : '') +
+      '</label>';
+  }).join('');
+  wrap.querySelectorAll('input[type="checkbox"]').forEach(input => {
+    input.addEventListener('change', () => {
+      const code = seasonalText(input.value);
+      if (!code) return;
+      if (input.checked) seasonalBlockSelectedTeachers.add(code);
+      else seasonalBlockSelectedTeachers.delete(code);
+      if (seasonalBlockEditingTeacher && !seasonalBlockSelectedTeachers.has(seasonalBlockEditingTeacher)) {
+        seasonalBlockEditingTeacher = '';
+        seasonalSetBlockEditMode(false);
+      }
+      seasonalRenderTeacherBlockGrid();
+      seasonalRenderBlockSelectionSummary();
+      seasonalUpdateBlockTeacherCount();
+    });
+  });
+  seasonalUpdateBlockTeacherCount();
+}
+
+function seasonalRenderBlockSelectionSummary() {
+  const el = document.getElementById('seasonal-block-selection-summary');
+  if (!el) return;
+  const teachers = [...seasonalBlockSelectedTeachers];
+  if (!teachers.length) {
+    el.textContent = '請先勾選教師，再點選日期 × 節次格位。';
+    return;
+  }
+  const pending = [...seasonalBlockPendingSlots].map(key => {
+    const parts = key.split('|');
+    return { date: parts[0], period: Number(parts[1]) };
+  });
+  const lines = ['勾選教師：' + teachers.join('、')];
+  lines.push(pending.length ? '本次選取：' + seasonalBlockSummarize(pending) : '本次選取：尚未點選格位');
+  if (teachers.length === 1) {
+    const rows = seasonalBlockRowsOf(teachers[0]);
+    lines.push('目前停排：' + (rows.length ? seasonalBlockSummarize(seasonalBlockSlotsOf(rows)) : '尚未設定'));
+  }
+  el.textContent = lines.join('｜');
 }
 
 function seasonalRenderTeacherBlockGrid() {
   const wrap = document.getElementById('seasonal-block-grid');
   if (!wrap) return;
-  const teacher = seasonalText(document.getElementById('seasonal-block-teacher')?.value);
-  if (!teacher) {
-    wrap.innerHTML = '<div class="seasonal-empty-inline">請先輸入或選擇教師，即可開始點選停排時段。</div>';
+  const teachers = [...seasonalBlockSelectedTeachers];
+  if (!teachers.length) {
+    wrap.innerHTML = '<div class="seasonal-empty-inline">請先勾選教師，即可開始點選停排時段。</div>';
     return;
   }
   const session = seasonalActiveSession();
@@ -850,44 +954,216 @@ function seasonalRenderTeacherBlockGrid() {
     wrap.innerHTML = '<div class="seasonal-empty-inline">請先設定實際上課日。</div>';
     return;
   }
-  const blocks = seasonalActiveRows('seasonalTeacherBlocks');
-  const head = '<thead><tr><th>日期</th>' + [1, 2, 3, 4, 5].map(period => '<th>第' + period + '節</th>').join('') + '</tr></thead>';
+  const savedSlots = new Set();
+  seasonalActiveRows('seasonalTeacherBlocks').forEach(row => {
+    if (!teachers.includes(seasonalText(row['教師姓名']))) return;
+    savedSlots.add(seasonalIso(row['日期']) + '|' + Number(row['節次']));
+  });
+  const head = '<thead><tr><th>日期</th>' + SEASONAL_BLOCK_PERIODS.map(period =>
+    '<th class="seasonal-block-day-head" data-period="' + period + '" style="cursor:pointer;" title="點選整節（所有上課日）">第' + period + '節</th>').join('') + '</tr></thead>';
   const rows = days.map(date => {
     const week = seasonalWeekNo(date, session && session['開始日期']);
-    const cells = ['<td class="seasonal-date-cell"><b>' + esc(seasonalDisplayDate(date)) + '</b><small>第' + week + '週</small></td>'];
-    for (let period = 1; period <= 5; period++) {
-      const blocked = seasonalTeacherBlocked(teacher, date, period, blocks);
-      cells.push('<td><button type="button" class="seasonal-block-cell' + (blocked ? ' is-blocked' : '') + '" data-date="' + esc(date) + '" data-period="' + period + '">' + (blocked ? '停排' : '') + '</button></td>');
-    }
+    const cells = ['<td class="seasonal-date-cell seasonal-block-date-head" data-date="' + esc(date) + '" style="cursor:pointer;" title="點選整日（第1~5節）"><b>' + esc(seasonalDisplayDate(date)) + '</b><small>第' + week + '週</small></td>'];
+    SEASONAL_BLOCK_PERIODS.forEach(period => {
+      const key = date + '|' + period;
+      const saved = savedSlots.has(key);
+      const selected = seasonalBlockPendingSlots.has(key);
+      const label = saved ? '停排' : (selected ? '待設定' : '');
+      cells.push('<td><button type="button" class="seasonal-block-cell' + (saved ? ' is-blocked' : '') + (selected ? ' is-selected' : '') +
+        '" data-date="' + esc(date) + '" data-period="' + period + '">' + label + '</button></td>');
+    });
     return '<tr>' + cells.join('') + '</tr>';
   }).join('');
   wrap.innerHTML = '<table class="seasonal-timetable-table seasonal-block-table">' + head + '<tbody>' + rows + '</tbody></table>';
-  wrap.querySelectorAll('.seasonal-block-cell').forEach(button => button.addEventListener('click', () => {
-    seasonalToggleTeacherBlock(teacher, button.dataset.date, Number(button.dataset.period));
-  }));
+  wrap.querySelectorAll('.seasonal-block-cell').forEach(button => {
+    button.addEventListener('click', () => seasonalToggleBlockPendingSlot(button.dataset.date, Number(button.dataset.period)));
+  });
+  wrap.querySelectorAll('.seasonal-block-day-head').forEach(cell => {
+    cell.addEventListener('click', () => seasonalToggleBlockPendingMany(days.map(date => date + '|' + Number(cell.dataset.period))));
+  });
+  wrap.querySelectorAll('.seasonal-block-date-head').forEach(cell => {
+    cell.addEventListener('click', () => seasonalToggleBlockPendingMany(SEASONAL_BLOCK_PERIODS.map(period => seasonalIso(cell.dataset.date) + '|' + period)));
+  });
 }
 
-async function seasonalToggleTeacherBlock(teacher, date, period) {
+function seasonalToggleBlockPendingSlot(date, period) {
   const target = seasonalIso(date);
   const slot = Number(period);
-  if (!seasonalText(teacher) || !target || !Number.isInteger(slot)) return;
-  const existing = seasonalActiveRows('seasonalTeacherBlocks').find(row =>
-    seasonalText(row['教師姓名']) === seasonalText(teacher) &&
-    seasonalIso(row['日期']) === target &&
-    Number(row['節次']) === slot);
-  if (existing) {
-    state.seasonalTeacherBlocks = (state.seasonalTeacherBlocks || []).filter(row => seasonalText(row['記錄ID']) !== seasonalText(existing['記錄ID']));
-  } else {
-    state.seasonalTeacherBlocks = [...(state.seasonalTeacherBlocks || []), {
-      '記錄ID': seasonalNewId('BLOCK'), '場次ID': seasonalActiveSessionId, '教師姓名': seasonalText(teacher),
-      '日期': target, '節次': String(slot), '原因': seasonalText(document.getElementById('seasonal-block-reason')?.value)
-    }];
+  if (!target || !Number.isInteger(slot)) return;
+  const key = target + '|' + slot;
+  if (seasonalBlockPendingSlots.has(key)) seasonalBlockPendingSlots.delete(key);
+  else seasonalBlockPendingSlots.add(key);
+  seasonalRenderTeacherBlockGrid();
+  seasonalRenderBlockSelectionSummary();
+}
+
+function seasonalToggleBlockPendingMany(keys) {
+  const list = (keys || []).filter(key => /^\d{4}-\d{2}-\d{2}\|\d+$/.test(key));
+  if (!list.length) return;
+  const allSelected = list.every(key => seasonalBlockPendingSlots.has(key));
+  list.forEach(key => { if (allSelected) seasonalBlockPendingSlots.delete(key); else seasonalBlockPendingSlots.add(key); });
+  seasonalRenderTeacherBlockGrid();
+  seasonalRenderBlockSelectionSummary();
+}
+
+function seasonalSetBlockEditMode(editing) {
+  const apply = document.getElementById('seasonal-block-apply-btn');
+  const clear = document.getElementById('seasonal-block-clear-btn');
+  if (apply) apply.textContent = editing ? '💾 儲存修改' : '⛔ 設定停排';
+  if (clear) clear.textContent = editing ? '↩️ 取消編輯' : '✅ 清除停排';
+  const notice = document.getElementById('seasonal-block-editing-notice');
+  if (!notice) return;
+  notice.hidden = !editing;
+  notice.textContent = editing ? '正在編輯：' + seasonalBlockEditingTeacher : '';
+}
+
+function seasonalRenderBlockTable() {
+  const body = document.getElementById('seasonal-blocks-body');
+  if (!body) return;
+  const grouped = new Map();
+  seasonalActiveRows('seasonalTeacherBlocks').forEach(row => {
+    const code = seasonalText(row['教師姓名']);
+    if (!code) return;
+    if (!grouped.has(code)) grouped.set(code, []);
+    grouped.get(code).push(row);
+  });
+  if (!grouped.size) {
+    body.innerHTML = '<tr><td colspan="4" class="text-center text-muted">尚未設定教師停排時段</td></tr>';
+    return;
+  }
+  const order = new Map(seasonalBlockTeacherCodes().map((code, index) => [code, index]));
+  const codes = [...grouped.keys()].sort((a, b) =>
+    (order.has(a) ? order.get(a) : Number.MAX_SAFE_INTEGER) - (order.has(b) ? order.get(b) : Number.MAX_SAFE_INTEGER));
+  body.innerHTML = codes.map(code => {
+    const rows = grouped.get(code);
+    const slots = seasonalBlockSummarize(seasonalBlockSlotsOf(rows));
+    const reasons = [...new Set(rows.map(row => seasonalText(row['原因'])).filter(Boolean))].join('、') || '—';
+    return '<tr><td><button type="button" class="block-teacher-link" data-edit-block-teacher="' + esc(code) + '" title="點選可帶入此教師的停排設定">' + esc(code) + '</button>' +
+      '<small class="seasonal-block-teacher-meta">' + rows.length + ' 節</small></td>' +
+      '<td class="seasonal-block-slot-text" title="' + esc(slots) + '">' + esc(slots) + '</td>' +
+      '<td>' + esc(reasons) + '</td>' +
+      '<td><div class="flex gap-1">' +
+      '<button class="btn btn-ghost btn-xs" type="button" data-edit-block-teacher="' + esc(code) + '">✏️ 編輯</button>' +
+      '<button class="btn btn-danger btn-xs" type="button" data-delete-block-teacher="' + esc(code) + '">🗑 刪除</button>' +
+      '</div></td></tr>';
+  }).join('');
+  body.querySelectorAll('[data-edit-block-teacher]').forEach(button => {
+    button.addEventListener('click', () => editSeasonalBlockTeacher(button.dataset.editBlockTeacher));
+  });
+  body.querySelectorAll('[data-delete-block-teacher]').forEach(button => {
+    button.addEventListener('click', () => deleteSeasonalBlockTeacher(button.dataset.deleteBlockTeacher));
+  });
+}
+
+function seasonalRenderTeacherBlocks() {
+  if (seasonalBlockEditingTeacher && !seasonalBlockRowsOf(seasonalBlockEditingTeacher).length) seasonalBlockEditingTeacher = '';
+  seasonalRenderBlockTeachers();
+  seasonalRenderTeacherBlockGrid();
+  seasonalRenderBlockTable();
+  seasonalRenderBlockSelectionSummary();
+  seasonalSetBlockEditMode(!!seasonalBlockEditingTeacher);
+}
+
+function editSeasonalBlockTeacher(teacher) {
+  const code = seasonalText(teacher);
+  if (!code) return;
+  const rows = seasonalBlockRowsOf(code);
+  seasonalBlockSelectedTeachers = new Set([code]);
+  seasonalBlockEditingTeacher = code;
+  seasonalBlockPendingSlots = new Set(rows.map(row => seasonalIso(row['日期']) + '|' + Number(row['節次'])));
+  const reasonRow = rows.find(row => seasonalText(row['原因']));
+  const reasonInput = document.getElementById('seasonal-block-reason');
+  if (reasonInput) reasonInput.value = reasonRow ? seasonalText(reasonRow['原因']) : '';
+  seasonalRenderTeacherBlocks();
+  const sectionBody = document.getElementById('seasonal-blocks-section-body');
+  if (sectionBody && typeof sectionBody.scrollIntoView === 'function') sectionBody.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  toast('已帶入 ' + code + ' 目前的停排時段，調整後按「儲存修改」。', 'info');
+}
+
+function cancelSeasonalBlockEdit(silent) {
+  seasonalBlockEditingTeacher = '';
+  seasonalBlockPendingSlots = new Set();
+  seasonalSetBlockEditMode(false);
+  seasonalRenderTeacherBlockGrid();
+  seasonalRenderBlockSelectionSummary();
+  if (!silent) toast('已取消編輯，原有停排設定沒有變更。', 'info');
+}
+
+function seasonalApplyBlockMode(rows, teacher, keys, reason, mode) {
+  const sessionId = seasonalActiveSessionId;
+  const name = seasonalText(teacher);
+  const isMine = row => seasonalText(row['場次ID']) === sessionId && seasonalText(row['教師姓名']) === name;
+  const mine = rows.filter(isMine);
+  const keyOf = row => seasonalIso(row['日期']) + '|' + Number(row['節次']);
+  const target = new Set(keys);
+  const kept = new Set();
+  if (mode === 'replace') target.forEach(key => kept.add(key));
+  else if (mode === 'add') { mine.forEach(row => kept.add(keyOf(row))); target.forEach(key => kept.add(key)); }
+  else mine.forEach(row => { if (!target.has(keyOf(row))) kept.add(keyOf(row)); });
+  const mineKeys = new Set(mine.map(keyOf));
+  const rebuilt = [];
+  mine.forEach(row => {
+    if (!kept.has(keyOf(row))) return;
+    const updated = { ...row };
+    if (reason) updated['原因'] = reason;
+    rebuilt.push(updated);
+  });
+  kept.forEach(key => {
+    if (mineKeys.has(key)) return;
+    const parts = key.split('|');
+    rebuilt.push({
+      '記錄ID': seasonalNewId('BLOCK'), '場次ID': sessionId, '教師姓名': name,
+      '日期': parts[0], '節次': String(Number(parts[1])), '原因': reason
+    });
+  });
+  return rows.filter(row => !isMine(row)).concat(rebuilt);
+}
+
+async function applySeasonalBlock(clear) {
+  if (clear && seasonalBlockEditingTeacher) { cancelSeasonalBlockEdit(false); return; }
+  const teachers = [...seasonalBlockSelectedTeachers];
+  if (!teachers.length) { toast('請至少勾選一位教師。', 'warning'); return; }
+  if (!seasonalBlockPendingSlots.size) { toast('請先點選要停排的日期與節次。', 'warning'); return; }
+  const reason = seasonalText(document.getElementById('seasonal-block-reason')?.value);
+  const keys = [...seasonalBlockPendingSlots];
+  const mode = seasonalBlockEditingTeacher ? 'replace' : (clear ? 'remove' : 'add');
+  let next = (state.seasonalTeacherBlocks || []).slice();
+  teachers.forEach(teacher => { next = seasonalApplyBlockMode(next, teacher, keys, reason, mode); });
+  state.seasonalTeacherBlocks = next;
+  seasonalBlockEditingTeacher = '';
+  seasonalBlockPendingSlots = new Set();
+  seasonalSetBlockEditMode(false);
+  const reasonInput = document.getElementById('seasonal-block-reason');
+  if (reasonInput) reasonInput.value = '';
+  seasonalRenderTeacherBlocks();
+  seasonalFillTeacherOptions();
+  seasonalPopulateViewSelect();
+  renderSeasonalTimetable();
+  const label = mode === 'replace' ? '已更新 ' : (clear ? '已清除 ' : '已設定 ');
+  const saved = await seasonalPersistActive();
+  toast(label + teachers.join('、') + ' 的停排時段。' + (saved ? '' : '（雲端同步失敗，請稍後重試）'), saved ? 'success' : 'warning');
+}
+
+async function deleteSeasonalBlockTeacher(teacher) {
+  const name = seasonalText(teacher);
+  const rows = seasonalBlockRowsOf(name);
+  if (!rows.length) return;
+  const summary = seasonalBlockSummarize(seasonalBlockSlotsOf(rows));
+  const confirmed = await showModal('確認刪除', '確定清除 ' + name + ' 在本場次的全部停排設定？<br><span class="text-muted">' + esc(summary) + '</span>', 'confirm', '清除停排', '取消');
+  if (!confirmed) return;
+  state.seasonalTeacherBlocks = (state.seasonalTeacherBlocks || []).filter(row =>
+    !(seasonalText(row['場次ID']) === seasonalActiveSessionId && seasonalText(row['教師姓名']) === name));
+  if (seasonalBlockEditingTeacher === name) {
+    seasonalBlockEditingTeacher = '';
+    seasonalBlockPendingSlots = new Set();
+    seasonalSetBlockEditMode(false);
   }
   seasonalRenderTeacherBlocks();
   seasonalFillTeacherOptions();
   seasonalPopulateViewSelect();
-  await seasonalPersistActive();
   renderSeasonalTimetable();
+  const saved = await seasonalPersistActive();
+  toast('已清除 ' + name + ' 的停排設定。' + (saved ? '' : '（雲端同步失敗，請稍後重試）'), saved ? 'success' : 'warning');
 }
 
 function seasonalGetScheduleCell(classCode, date, period) {

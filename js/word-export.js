@@ -1828,9 +1828,13 @@ function mergeEmptyFlexRows(pageXml, flexCount) {
   return pageXml.replace(tblRe, newTbl);
 }
 
+function getTemplateCacheToken() {
+  return typeof FRONTEND_VERSION !== 'undefined' ? encodeURIComponent(FRONTEND_VERSION) : '1';
+}
+
 async function loadTemplate() {
   if (_tplCache) return _tplCache;
-  const resp = await fetch('assets/templates/class-official-template.docx?t=' + Date.now());
+  const resp = await fetch('assets/templates/class-official-template.docx?v=' + getTemplateCacheToken());
   if (!resp.ok) throw new Error('無法載入模板 HTTP ' + resp.status);
   const buf = await resp.arrayBuffer();
   const zip = parseDocxZip(buf);
@@ -1856,7 +1860,7 @@ async function loadTemplate() {
 
 async function loadTeacherTemplate() {
   if (_teacherTplCache) return _teacherTplCache;
-  const resp = await fetch('assets/templates/teacher-official-template.docx?t=' + Date.now());
+  const resp = await fetch('assets/templates/teacher-official-template.docx?v=' + getTemplateCacheToken());
   if (!resp.ok) throw new Error('無法載入教師模板 HTTP ' + resp.status);
   const buf = await resp.arrayBuffer();
   const zip = parseDocxZip(buf);
@@ -2462,7 +2466,7 @@ function buildPatrolExcelSheetXml(sheetXml, sharedStringsXml, yearNum, semNum) {
 
 async function loadPatrolExcelTemplate() {
   if (_patrolExcelTplCache) return _patrolExcelTplCache;
-  const resp = await fetch('assets/templates/walkthrough-template.xlsx?t=' + Date.now());
+  const resp = await fetch('assets/templates/walkthrough-template.xlsx?v=' + getTemplateCacheToken());
   if (!resp.ok) throw new Error('無法載入巡堂 Excel 範本 HTTP ' + resp.status);
   const buf = await resp.arrayBuffer();
   const zip = parseDocxZip(buf);
@@ -2496,7 +2500,6 @@ async function startPatrolWordExport() {
   if (msg) msg.textContent = '載入巡堂 Excel 範本…';
   if (bar) bar.style.width = '20%';
   try {
-    _patrolExcelTplCache = null;
     const tpl = await loadPatrolExcelTemplate();
     const settingsMap = state.settings || {};
     const termCode = settingsMap['學期代號'] || '114-1';
@@ -2552,7 +2555,6 @@ async function startClassWordExport() {
   if (bar) bar.style.width = '5%';
 
   try {
-    _tplCache = null;
     const tpl = await loadTemplate();
     if (bar) bar.style.width = '12%';
 
@@ -2627,7 +2629,6 @@ async function startTeacherWordExport() {
   if (bar) bar.style.width = '5%';
 
   try {
-    _teacherTplCache = null;
     const tpl = await loadTeacherTemplate();
     if (bar) bar.style.width = '12%';
 
@@ -2687,7 +2688,7 @@ async function startTeacherWordExport() {
 
 async function loadRoomTemplate() {
   if (_roomTplCache) return _roomTplCache;
-  const resp = await fetch('assets/templates/room-official-template.docx?t=' + Date.now());
+  const resp = await fetch('assets/templates/room-official-template.docx?v=' + getTemplateCacheToken());
   if (!resp.ok) throw new Error('無法載入教室模板 HTTP ' + resp.status);
   const buf = await resp.arrayBuffer();
   const zip = parseDocxZip(buf);
@@ -2713,13 +2714,33 @@ async function loadRoomTemplate() {
 
 function collectRoomTeacherSummary(roomCode) {
   const teacherMap = {};
+  const targetRoom = String(roomCode || '');
+  const useIndex = idx.__built && idx.schedByRoomSlot;
+  let roomEntries = [];
+  if (useIndex) {
+    const seen = new Set();
+    const prefix = targetRoom + '|';
+    Object.keys(idx.schedByRoomSlot).forEach(key => {
+      if (!key.startsWith(prefix)) return;
+      (idx.schedByRoomSlot[key] || []).forEach(entry => {
+        if (!seen.has(entry)) {
+          seen.add(entry);
+          roomEntries.push(entry);
+        }
+      });
+    });
+  } else {
+    roomEntries = state.schedule || [];
+  }
 
-  (state.schedule || []).forEach(s => {
+  roomEntries.forEach(s => {
     const subCode = String(s['科目代碼'] || '').trim();
     if (!subCode) return;
-    const subInfo = idx.subjectByCode[subCode];
-    const room = subInfo ? String(subInfo['所屬教室代碼'] || '').trim() : '';
-    if (room !== String(roomCode)) return;
+    if (!useIndex) {
+      const subInfo = idx.subjectByCode[subCode];
+      const room = subInfo ? String(subInfo['所屬教室代碼'] || '').trim() : '';
+      if (room !== targetRoom) return;
+    }
 
     const clsCode = String(s['班級代碼'] || '').trim();
     const teacherList = getCellTeacherList(s);
@@ -2841,7 +2862,6 @@ async function startRoomWordExport() {
   if (bar) bar.style.width = '5%';
 
   try {
-    _roomTplCache = null;
     const tpl = await loadRoomTemplate();
     if (bar) bar.style.width = '12%';
 

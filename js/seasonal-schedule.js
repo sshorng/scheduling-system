@@ -1412,6 +1412,23 @@ async function saveSeasonalBatchAssign() {
   const slots = Array.from(seasonalSelectedSlots.values());
   let currentSchedule = [...(state.seasonalSchedule || [])];
   const teacherBlocks = seasonalActiveRows('seasonalTeacherBlocks');
+
+  // 先對本場次課表建立雙重查詢索引，避免批次格位迴圈反覆線性掃描
+  const activeClassSlotIdxMap = new Map();
+  const activeTeacherSlotEntries = new Map();
+  currentSchedule.forEach((row, index) => {
+    if (seasonalText(row['場次ID']) !== seasonalActiveSessionId) return;
+    const rowCls = seasonalText(row['班級代碼']);
+    const rowDate = seasonalIso(row['日期']);
+    const rowPeriod = Number(row['節次']);
+    activeClassSlotIdxMap.set(rowCls + '|' + rowDate + '|' + rowPeriod, index);
+    const rowTeacher = seasonalText(row['教師姓名']);
+    if (rowTeacher) {
+      const tk = seasonalTeacherSlotKey(rowTeacher, rowDate, rowPeriod);
+      if (!activeTeacherSlotEntries.has(tk)) activeTeacherSlotEntries.set(tk, []);
+      activeTeacherSlotEntries.get(tk).push(row);
+    }
+  });
   
   // 檢查教師停排
   if (teacher) {
@@ -1433,13 +1450,8 @@ async function saveSeasonalBatchAssign() {
       teacherSlots.add(slotTeacherKey);
       
       // 也檢查已有課表（非此班級）是否已衝堂
-      const existingOtherClass = currentSchedule.find(row =>
-        seasonalText(row['場次ID']) === seasonalActiveSessionId &&
-        seasonalText(row['班級代碼']) !== slot.classCode &&
-        seasonalIso(row['日期']) === slot.date &&
-        Number(row['節次']) === slot.period &&
-        seasonalText(row['教師姓名']) === teacher
-      );
+      const existingOtherClass = (activeTeacherSlotEntries.get(slotTeacherKey) || [])
+        .find(row => seasonalText(row['班級代碼']) !== slot.classCode);
       if (existingOtherClass) {
         toast(teacher + ' 老師在 ' + seasonalDisplayDate(slot.date) + ' 第' + slot.period + '節已有 ' + existingOtherClass['班級代碼'] + ' 的課程！', 'error');
         return;
@@ -1449,12 +1461,8 @@ async function saveSeasonalBatchAssign() {
   
   let appliedCount = 0;
   for (const slot of slots) {
-    const existingIdx = currentSchedule.findIndex(row =>
-      seasonalText(row['場次ID']) === seasonalActiveSessionId &&
-      seasonalText(row['班級代碼']) === slot.classCode &&
-      seasonalIso(row['日期']) === slot.date &&
-      Number(row['節次']) === slot.period
-    );
+    const slotIdxKey = seasonalText(slot.classCode) + '|' + seasonalIso(slot.date) + '|' + Number(slot.period);
+    const existingIdx = activeClassSlotIdxMap.has(slotIdxKey) ? activeClassSlotIdxMap.get(slotIdxKey) : -1;
     
     if (existingIdx !== -1) {
       if (!overwrite) continue;
@@ -1486,6 +1494,7 @@ async function saveSeasonalBatchAssign() {
         '手動安排': 'TRUE',
         '需求ID': seasonalFindNeedForManual(slot.classCode, slot.date, slot.period, finalSubject, finalTeacher, '')
       };
+      activeClassSlotIdxMap.set(slotIdxKey, currentSchedule.length);
       currentSchedule.push(newRow);
       appliedCount++;
     }
@@ -1673,11 +1682,18 @@ function renderSeasonalTimetable() {
     wrap.querySelectorAll('.seasonal-slot-button').forEach(bindSeasonalSlotButton);
     updateSeasonalSelectionUI();
   } else {
+    const teacherScheduleBySlot = new Map();
+    schedule.forEach(row => {
+      if (seasonalText(row['教師姓名']) !== person) return;
+      const slotKey = seasonalIso(row['日期']) + '|' + Number(row['節次']);
+      if (!teacherScheduleBySlot.has(slotKey)) teacherScheduleBySlot.set(slotKey, []);
+      teacherScheduleBySlot.get(slotKey).push(row);
+    });
     const rows = days.map(date => {
       const week = seasonalWeekNo(date, session['開始日期']);
       const cells = ['<td class="seasonal-date-cell"><b>' + esc(seasonalDisplayDate(date)) + '</b><small>第' + week + '週</small></td>'];
       for (let period = 1; period <= 5; period++) {
-        const items = schedule.filter(row => seasonalText(row['教師姓名']) === person && seasonalIso(row['日期']) === date && Number(row['節次']) === period);
+        const items = teacherScheduleBySlot.get(date + '|' + period) || [];
         const cell = items.map(row => {
           const canDrag = !seasonalIsTrue(row['是否鎖定']);
           return '<button class="seasonal-slot-button has-course" type="button" draggable="' + (canDrag ? 'true' : 'false') + '" data-id="' + esc(row['課表ID']) + '" data-class="' + esc(row['班級代碼']) + '" data-date="' + esc(date) + '" data-period="' + period + '">' + esc(row['班級代碼']) + '<small>' + seasonalCourseChip(row['科目代碼'], row['班級代碼']) + '</small></button>';

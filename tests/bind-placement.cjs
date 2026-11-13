@@ -131,11 +131,14 @@ function addEnglish(data, classCode, teacher, weekly) {
   });
 }
 
+const { FRONTEND_MODULES } = require('./helpers/loader.js');
+
 function buildContext(data) {
   const context = createContext();
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync(path.join(root, 'js/app.js'), 'utf8'), context, { filename: 'app.js' });
-  vm.runInContext(fs.readFileSync(path.join(root, 'js/app-runtime.js'), 'utf8'), context, { filename: 'app-runtime.js' });
+  for (const relPath of FRONTEND_MODULES) {
+    vm.runInContext(fs.readFileSync(path.join(root, relPath), 'utf8'), context, { filename: relPath });
+  }
   context.__inputData = data;
   vm.runInContext(`
     applyData(__inputData);

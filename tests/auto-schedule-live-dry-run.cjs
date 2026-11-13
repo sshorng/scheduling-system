@@ -225,10 +225,12 @@ async function main() {
       { '規則ID': 'TEST_EX_2', '教師A': '黃筱卉', '教師B': '游皓宇', '備註': 'test' }
     ];
   }
+  const { FRONTEND_MODULES } = require('./helpers/loader.js');
   const context = createBrowserLikeContext({ mode, randomize, randomSeed });
   vm.createContext(context);
-  vm.runInContext(fs.readFileSync(path.join(root, 'js/app.js'), 'utf8'), context, { filename: 'app.js' });
-  vm.runInContext(fs.readFileSync(path.join(root, 'js/app-runtime.js'), 'utf8'), context, { filename: 'app-runtime.js' });
+  for (const relPath of FRONTEND_MODULES) {
+    vm.runInContext(fs.readFileSync(path.join(root, relPath), 'utf8'), context, { filename: relPath });
+  }
   context.__inputData = data;
   vm.runInContext(`
     applyData(__inputData);

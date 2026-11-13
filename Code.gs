@@ -16,7 +16,7 @@ const SCHEMA_VERSION = '20261007_v4_seasonal_slots';
 
 // 所有會改動試算表的動作共用同一把 ScriptLock，避免多視窗或快速連點互相覆寫。
 const LOCKED_WRITE_ACTIONS = new Set([
-  'ensureSchema', 'updateCell', 'clearCell', 'swapCells', 'lockCell', 'setOvertime', 'batchSetOvertime',
+  'ensureSchema', 'updateCell', 'clearCell', 'swapCells', 'moveCell', 'lockCell', 'setOvertime', 'batchSetOvertime',
   'saveMeta', 'renameTeacher', 'deleteMeta', 'saveTeacherBlock', 'saveSubjectRule',
   'saveSubjectRelation', 'saveTeacherExclusive', 'savePatrolSchedule',
   'initDatabase', 'batchUpdateSchedule', 'saveSeasonalBundle'
@@ -148,11 +148,16 @@ function doPost(e) {
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    if (action !== 'getAll' && action !== 'ensureSchema') ensureAllSheetsCached_(ss);
+    payload.__fromDoPost = true;
+    const skipSyncSchema = action === 'bootstrap' || action === 'verifyAdmin';
+    if (!skipSyncSchema) {
+      if (action !== 'getAll' && action !== 'ensureSchema') ensureAllSheetsCached_(ss);
+    }
 
     let result;
     switch (action) {
       case 'getAll':            result = getAll_(ss); break;
+      case 'bootstrap':         result = bootstrap_(ss, payload); break;
       case 'ensureSchema': {
         const schemaInfo = ensureAllSheetsCached_(ss) || {};
         result = Object.assign({ schemaVersion: SCHEMA_VERSION }, schemaInfo);
@@ -161,6 +166,7 @@ function doPost(e) {
       case 'updateCell':        result = updateCell_(ss, payload); break;
       case 'clearCell':         result = clearCell_(ss, payload); break;
       case 'swapCells':         result = swapCells_(ss, payload); break;
+      case 'moveCell':          result = moveCell_(ss, payload); break;
       case 'lockCell':          result = lockCell_(ss, payload); break;
       case 'setOvertime':       result = setOvertime_(ss, payload); break;
       case 'batchSetOvertime':  result = batchSetOvertime_(ss, payload); break;
@@ -188,6 +194,9 @@ function doPost(e) {
       : result && result.ok === false
         ? { ok: false, error: result.error || '試算表寫入未完成', data: result }
         : { ok: true, data: result };
+    if (requiresLock && action !== 'ensureSchema' && response.ok) {
+      invalidateAllCache_(ss);
+    }
     if (requiresLock && requestId && !response.retryable) cacheWriteResponse_(requestId, response);
     return jsonOut_(response);
   } catch (err) {
@@ -227,6 +236,92 @@ function cacheWriteResponse_(requestId, response) {
     if (raw.length <= 90000) CacheService.getScriptCache().put(key, raw, 21600);
   } catch (err) {
     // 快取失敗不應影響已完成的試算表寫入。
+  }
+}
+
+const ALL_DATA_CACHE_PREFIX = 'sch-all-v1-';
+const ALL_DATA_CACHE_GEN_PREFIX = 'sch-all-gen-v1-';
+const ALL_DATA_CACHE_TTL_SEC = 1800;
+const ALL_DATA_CACHE_CHUNK_SIZE = 80000;
+
+function allCacheNamespace_(ss) {
+  try {
+    return (ss && typeof ss.getId === 'function' ? String(ss.getId() || '').trim() : '') || 'default';
+  } catch (err) {
+    return 'default';
+  }
+}
+
+function getAllCacheGen_(cache, ns) {
+  const gen = cache.get(ALL_DATA_CACHE_GEN_PREFIX + ns);
+  return gen ? String(gen) : '0';
+}
+
+function invalidateAllCache_(ss) {
+  if (typeof CacheService === 'undefined') return;
+  try {
+    const cache = CacheService.getScriptCache();
+    if (!cache || typeof cache.put !== 'function') return;
+    const ns = allCacheNamespace_(ss);
+    const nextGen = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+    cache.put(ALL_DATA_CACHE_GEN_PREFIX + ns, nextGen, 21600);
+  } catch (err) {
+    // 失效快取失敗不應影響主寫入流程。
+  }
+}
+
+function invalidateCacheIfDirect_(ss, payload) {
+  if (!payload || !payload.__fromDoPost) invalidateAllCache_(ss);
+}
+
+function getCachedAllData_(ss) {
+  if (typeof CacheService === 'undefined') return null;
+  try {
+    const cache = CacheService.getScriptCache();
+    if (!cache || typeof cache.get !== 'function' || typeof cache.getAll !== 'function') return null;
+    const ns = allCacheNamespace_(ss);
+    const gen = getAllCacheGen_(cache, ns);
+    const prefix = ALL_DATA_CACHE_PREFIX + ns + '-g' + gen + '-';
+    const metaRaw = cache.get(prefix + 'meta');
+    if (!metaRaw) return null;
+    const meta = JSON.parse(metaRaw);
+    if (!meta || !Number.isInteger(meta.chunks) || meta.chunks <= 0 || !Number.isInteger(meta.len)) return null;
+    const keys = [];
+    for (let i = 0; i < meta.chunks; i++) keys.push(prefix + 'c' + i);
+    const entries = cache.getAll(keys) || {};
+    let combined = '';
+    for (let i = 0; i < keys.length; i++) {
+      const part = entries[keys[i]];
+      if (typeof part !== 'string') return null;
+      combined += part;
+    }
+    if (combined.length !== meta.len) return null;
+    return JSON.parse(combined);
+  } catch (err) {
+    return null;
+  }
+}
+
+function putCachedAllData_(ss, data) {
+  if (typeof CacheService === 'undefined' || !data) return;
+  try {
+    const cache = CacheService.getScriptCache();
+    if (!cache || typeof cache.putAll !== 'function') return;
+    const raw = JSON.stringify(data);
+    // 控制單次快取總分片上限，避免超大負載超過 Apps Script CacheService 配額。
+    if (raw.length > ALL_DATA_CACHE_CHUNK_SIZE * 30) return;
+    const ns = allCacheNamespace_(ss);
+    const gen = getAllCacheGen_(cache, ns);
+    const prefix = ALL_DATA_CACHE_PREFIX + ns + '-g' + gen + '-';
+    const entries = {};
+    const chunks = Math.ceil(raw.length / ALL_DATA_CACHE_CHUNK_SIZE) || 1;
+    for (let i = 0; i < chunks; i++) {
+      entries[prefix + 'c' + i] = raw.slice(i * ALL_DATA_CACHE_CHUNK_SIZE, (i + 1) * ALL_DATA_CACHE_CHUNK_SIZE);
+    }
+    entries[prefix + 'meta'] = JSON.stringify({ chunks, len: raw.length });
+    cache.putAll(entries, ALL_DATA_CACHE_TTL_SEC);
+  } catch (err) {
+    // 分片快取寫入失敗時退回直讀工作表。
   }
 }
 
@@ -613,10 +708,15 @@ function getSettingsMap_(ss) {
   return settings;
 }
 
-function getAll_(ss) {
+function getAll_(ss, options) {
+  const skipCache = options && options.skipCache === true;
+  if (!skipCache) {
+    const cached = getCachedAllData_(ss);
+    if (cached && typeof cached === 'object') return cached;
+  }
   const schedule = sheetToObjects_(ss.getSheetByName('課表'));
   const seasonalSessions = sheetToObjects_(ss.getSheetByName('寒暑輔-場次'));
-  return {
+  const data = {
     gasVersion:          GAS_VERSION,
     schemaVersion:       SCHEMA_VERSION,
     classes:            sheetToObjects_(ss.getSheetByName('班級')),
@@ -638,6 +738,45 @@ function getAll_(ss) {
     seasonalTeacherBlocks: sheetToObjects_(ss.getSheetByName('寒暑輔-停排')),
     seasonalSchedule:   sheetToObjects_(ss.getSheetByName('寒暑輔-課表')),
     settings:           getSettingsMap_(ss)
+  };
+  if (!skipCache) putCachedAllData_(ss, data);
+  return data;
+}
+
+function bootstrap_(ss, payload) {
+  const opts = payload && typeof payload === 'object' ? payload : {};
+  const cachedAll = getCachedAllData_(ss);
+  const settings = cachedAll && cachedAll.settings ? cachedAll.settings : getSettingsMap_(ss);
+  const pwd = String(settings['AdminPassword'] || '');
+  const password = String(opts.password || '');
+  const authRequired = Boolean(pwd);
+  const authenticated = !authRequired || opts.authSessionOk === true || password === pwd;
+  let sheetUrl = '';
+  try {
+    sheetUrl = ss && typeof ss.getUrl === 'function' ? String(ss.getUrl() || '') : '';
+  } catch (err) {
+    sheetUrl = '';
+  }
+  if (!authenticated) {
+    return {
+      ok: true,
+      authRequired: true,
+      authenticated: false,
+      error: password ? '密碼錯誤' : '需要管理員驗證',
+      gasVersion: GAS_VERSION,
+      schemaVersion: SCHEMA_VERSION,
+      sheetUrl
+    };
+  }
+  const allData = cachedAll || getAll_(ss);
+  return {
+    ok: true,
+    authRequired,
+    authenticated: true,
+    gasVersion: GAS_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    sheetUrl,
+    data: allData
   };
 }
 
@@ -785,6 +924,16 @@ function validateSeasonalBundle_(bundle) {
   return '';
 }
 
+function serializeSeasonalRows_(sheetName, rows) {
+  const headers = SHEET_DEFS[sheetName].headers;
+  return JSON.stringify((rows || []).map(row => headers.map(header => {
+    const value = row && row[header] != null ? row[header] : '';
+    return value instanceof Date
+      ? Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+      : String(value);
+  })));
+}
+
 function saveSeasonalBundle_(ss, payload) {
   const bundle = payload && payload.bundle ? payload.bundle : {};
   const session = Object.assign({}, bundle.session || {});
@@ -816,9 +965,16 @@ function saveSeasonalBundle_(ss, payload) {
     .filter(Boolean))).sort().join(',');
 
   replaceSeasonalSessionRows_(ss, '寒暑輔-場次', sessionId, [session]);
-  replaceSeasonalSessionRows_(ss, '寒暑輔-需求', sessionId, normalizedBundle.needs);
-  replaceSeasonalSessionRows_(ss, '寒暑輔-停排', sessionId, normalizedBundle.teacherBlocks);
-  replaceSeasonalSessionRows_(ss, '寒暑輔-課表', sessionId, normalizedBundle.schedule);
+  if (!current.session || serializeSeasonalRows_('寒暑輔-需求', current.needs) !== serializeSeasonalRows_('寒暑輔-需求', normalizedBundle.needs)) {
+    replaceSeasonalSessionRows_(ss, '寒暑輔-需求', sessionId, normalizedBundle.needs);
+  }
+  if (!current.session || serializeSeasonalRows_('寒暑輔-停排', current.teacherBlocks) !== serializeSeasonalRows_('寒暑輔-停排', normalizedBundle.teacherBlocks)) {
+    replaceSeasonalSessionRows_(ss, '寒暑輔-停排', sessionId, normalizedBundle.teacherBlocks);
+  }
+  if (!current.session || serializeSeasonalRows_('寒暑輔-課表', current.schedule) !== serializeSeasonalRows_('寒暑輔-課表', normalizedBundle.schedule)) {
+    replaceSeasonalSessionRows_(ss, '寒暑輔-課表', sessionId, normalizedBundle.schedule);
+  }
+  if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, payload);
   return { ok: true, version: nextVersion, session };
 }
 
@@ -1341,7 +1497,16 @@ function updateCell_(ss, p) {
   } else {
     sheet.appendRow(values);
   }
-  return { ok: true, cell: newRow, conflicts, scheduleRevision: scheduleRevision_(sheetToObjects_(sheet)) };
+  const removeSet = new Set(matchingIndices.slice(1));
+  const nextRows = rows.filter((_, index) => !removeSet.has(index));
+  if (matchingIndices.length > 0) {
+    const firstPos = nextRows.indexOf(rows[matchingIndices[0]]);
+    if (firstPos >= 0) nextRows[firstPos] = newRow;
+  } else {
+    nextRows.push(newRow);
+  }
+  if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, p);
+  return { ok: true, cell: newRow, conflicts, scheduleRevision: scheduleRevision_(nextRows) };
 }
 
 function clearCell_(ss, p) {
@@ -1384,7 +1549,20 @@ function clearCell_(ss, p) {
   for (let i = deleteIndices.length - 1; i >= 0; i--) {
     sheet.deleteRow(deleteIndices[i] + 2);
   }
-  return { ok: true, scheduleRevision: scheduleRevision_(sheetToObjects_(sheet)) };
+  const deleteSet = new Set(deleteIndices);
+  const nextRows = rows.filter((_, index) => !deleteSet.has(index));
+  if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, p);
+  return { ok: true, scheduleRevision: scheduleRevision_(nextRows) };
+}
+
+function buildScheduleRowObject_(cell, cls, day, period, weekType) {
+  const targetWeek = parseInt(period, 10) === 8 ? String(weekType || '').trim() : '';
+  return Object.assign({}, cell, {
+    '班級代碼': String(cls),
+    '星期': parseInt(day, 10),
+    '節次': parseInt(period, 10),
+    ...(targetWeek ? { '課堂屬性': targetWeek } : {})
+  });
 }
 
 function swapCells_(ss, p) {
@@ -1435,25 +1613,133 @@ function swapCells_(ss, p) {
     return { ok: false, blocked: true, error: '凍結課程不可互調，請先解除固定設定' };
   }
 
-  [ia, ib].filter(i => i >= 0).sort((a, b) => b - a).forEach(i => sheet.deleteRow(i + 2));
+  const nextRows = rows.slice();
+  const rowToValues = obj => headers.map(h => (obj[h] !== undefined ? obj[h] : ''));
+  const nextA = ra ? buildScheduleRowObject_(ra, p.b.classCode, p.b.day, p.b.period, weekOf(p.b)) : null;
+  const nextB = rb ? buildScheduleRowObject_(rb, p.a.classCode, p.a.day, p.a.period, weekOf(p.a)) : null;
 
-  function writeSwap(cell, cls, day, period, weekType) {
-    if (!cell) return;
-    const targetWeek = parseInt(period, 10) === 8
-      ? String(weekType || '').trim()
-      : '';
-    const values = headers.map(h => {
-      if (h === '班級代碼') return String(cls);
-      if (h === '星期')    return parseInt(day, 10);
-      if (h === '節次')    return parseInt(period, 10);
-      if (h === '課堂屬性' && targetWeek) return targetWeek;
-      return cell[h] !== undefined ? cell[h] : '';
-    });
-    sheet.appendRow(values);
+  if (ia >= 0 && ib >= 0 && ia !== ib) {
+    sheet.getRange(ia + 2, 1, 1, headers.length).setValues([rowToValues(nextB)]);
+    sheet.getRange(ib + 2, 1, 1, headers.length).setValues([rowToValues(nextA)]);
+    nextRows[ia] = nextB;
+    nextRows[ib] = nextA;
+  } else if (ia >= 0 && !rb) {
+    sheet.getRange(ia + 2, 1, 1, headers.length).setValues([rowToValues(nextA)]);
+    nextRows[ia] = nextA;
+  } else if (ib >= 0 && !ra) {
+    sheet.getRange(ib + 2, 1, 1, headers.length).setValues([rowToValues(nextB)]);
+    nextRows[ib] = nextB;
   }
-  writeSwap(ra, p.b.classCode, p.b.day, p.b.period, weekOf(p.b));
-  writeSwap(rb, p.a.classCode, p.a.day, p.a.period, weekOf(p.a));
-  return { ok: true, scheduleRevision: scheduleRevision_(sheetToObjects_(sheet)) };
+  if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, p);
+  return { ok: true, scheduleRevision: scheduleRevision_(nextRows) };
+}
+
+function moveCell_(ss, p) {
+  const sheet = ss.getSheetByName('課表');
+  const rows = sheetToObjects_(sheet);
+  const preloaded = {
+    schedule: rows,
+    subjects: sheetToObjects_(ss.getSheetByName('科目')),
+    assignments: sheetToObjects_(ss.getSheetByName('配課')),
+    teacherBlocks: sheetToObjects_(ss.getSheetByName('不排課')),
+    subjectRules: sheetToObjects_(ss.getSheetByName('科目規則')),
+    teacherExclusives: sheetToObjects_(ss.getSheetByName('互斥')),
+    classes: sheetToObjects_(ss.getSheetByName('班級')),
+    blockGroups: sheetToObjects_(ss.getSheetByName('綁班'))
+  };
+  const headers = SHEET_DEFS['課表'].headers;
+  const srcCls = String(p.srcClassCode || p.srcCls || '').trim();
+  const srcDayN = parseInt(p.srcDay, 10);
+  const srcPeriodN = parseInt(p.srcPeriod !== undefined ? p.srcPeriod : p.srcPer, 10);
+  const srcWeek = srcPeriodN === 8 ? String(p.srcWeekType || p.srcWeek || '').trim() : '';
+
+  const dstCls = String(p.dstClassCode || p.dstCls || '').trim();
+  const dstDayN = parseInt(p.dstDay, 10);
+  const dstPeriodN = parseInt(p.dstPeriod !== undefined ? p.dstPeriod : p.dstPer, 10);
+  const dstWeek = dstPeriodN === 8 ? String(p.dstWeekType || p.dstWeek || p.weekType || p.attr || '').trim() : '';
+
+  const srcIndices = findScheduleSlotIndices_(rows, srcCls, srcDayN, srcPeriodN, srcWeek);
+  if (srcIndices.length === 0) {
+    return { ok: false, error: '找不到來源課堂，請重新載入課表' };
+  }
+  const srcCell = rows[srcIndices[0]];
+  const classRows = preloaded.classes || [];
+  const frozenRules = preloaded.subjectRules || [];
+  const blockGroups = preloaded.blockGroups || [];
+
+  if (srcIndices.some(index => isClearFrozenScheduleEntry_(rows[index], frozenRules, classRows))) {
+    return { ok: false, blocked: true, error: '凍結課程不可移動，請先解除固定設定' };
+  }
+  if (srcIndices.some(index => getBindGroupForEntry_(rows[index], blockGroups))) {
+    return { ok: false, blocked: true, error: '綁班課程需整組移動，不可單班移動' };
+  }
+
+  const dstIndices = findScheduleSlotIndices_(rows, dstCls, dstDayN, dstPeriodN, dstWeek);
+  if (dstIndices.some(index => isFrozenScheduleEntry_(rows[index], frozenRules, classRows))) {
+    return { ok: false, blocked: true, error: '凍結課程不可覆寫，請先解除固定設定' };
+  }
+  if (dstIndices.some(index => getBindGroupForEntry_(rows[index], blockGroups))) {
+    return { ok: false, blocked: true, error: '綁班課程不可被單獨覆寫，請整組移動或編輯' };
+  }
+
+  const virtualClassMap = classRows.reduce((map, row) => {
+    map[String(row['班級代碼'] || '').trim()] = row;
+    return map;
+  }, {});
+  const forcePullOut = isManualOnlyPeriod_(dstPeriodN) || isVirtualClassRow_(virtualClassMap, dstCls);
+  const srcAttr = String(srcCell['課堂屬性'] || '一般').trim() || '一般';
+  const targetAttr = forcePullOut
+    ? '抽離'
+    : (dstPeriodN === 8
+        ? (dstWeek || (srcPeriodN === 8 ? srcAttr : '單週'))
+        : (p.attr || (srcAttr === '單週' || srcAttr === '雙週' || srcAttr === '抽離' ? '一般' : srcAttr)));
+
+  const movedId = String(srcCell['課表ID'] || '').trim() || genId_();
+  const teacherTc = normalizeTeacherCode_(p.teacherCode !== undefined ? p.teacherCode : srcCell['教師姓名']);
+  const movedRow = {
+    '課表ID': movedId,
+    '班級代碼': dstCls,
+    '星期': dstDayN,
+    '節次': dstPeriodN,
+    '科目代碼': String(srcCell['科目代碼'] || ''),
+    '教師姓名': teacherTc,
+    '課堂屬性': targetAttr,
+    '是否鎖定': p.isLocked === true ? 'TRUE' : 'FALSE'
+  };
+
+  const removedSet = new Set([...srcIndices, ...dstIndices]);
+  const candidateRows = rows.filter((_, index) => !removedSet.has(index));
+  const conflictPayload = {
+    classCode: dstCls,
+    day: dstDayN,
+    period: dstPeriodN,
+    subjectCode: movedRow['科目代碼'],
+    teacherCode: p.teacherCode !== undefined ? p.teacherCode : srcCell['教師姓名'],
+    attr: targetAttr,
+    weekType: dstPeriodN === 8 ? targetAttr : '',
+    isVirtual: forcePullOut,
+    force: p.force === true,
+    allowCoTeacherOverlap: true
+  };
+  const conflicts = checkConflicts_(ss, conflictPayload, movedId, { ...preloaded, schedule: candidateRows });
+  const blockingConflicts = conflicts.filter(c =>
+    c.hard && !(p.force === true && c.kind !== 'teacher' && c.kind !== 'banned')
+  );
+  if (blockingConflicts.length > 0) return { blocked: true, conflicts };
+
+  const values = headers.map(h => movedRow[h] !== undefined ? movedRow[h] : '');
+  const targetWriteIndex = srcIndices[0];
+  sheet.getRange(targetWriteIndex + 2, 1, 1, values.length).setValues([values]);
+  const deleteIndices = Array.from(removedSet).filter(index => index !== targetWriteIndex).sort((a, b) => b - a);
+  deleteIndices.forEach(index => sheet.deleteRow(index + 2));
+
+  const nextRows = [];
+  for (let i = 0; i < rows.length; i++) {
+    if (i === targetWriteIndex) nextRows.push(movedRow);
+    else if (!removedSet.has(i)) nextRows.push(rows[i]);
+  }
+  if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, p);
+  return { ok: true, cell: movedRow, conflicts, scheduleRevision: scheduleRevision_(nextRows) };
 }
 
 function lockCell_(ss, p) {
@@ -1502,8 +1788,13 @@ function lockCell_(ss, p) {
     targetIndices = expectedKeys.map(key => indexByKey.get(key));
   }
   const col = SHEET_DEFS['課表'].headers.indexOf('是否鎖定') + 1;
-  targetIndices.forEach(rowIndex => sheet.getRange(rowIndex + 2, col).setValue(p.locked ? 'TRUE' : 'FALSE'));
-  return { ok: true, scheduleRevision: scheduleRevision_(sheetToObjects_(sheet)) };
+  const lockedStr = p.locked ? 'TRUE' : 'FALSE';
+  targetIndices.forEach(rowIndex => {
+    sheet.getRange(rowIndex + 2, col).setValue(lockedStr);
+    rows[rowIndex]['是否鎖定'] = lockedStr;
+  });
+  if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, p);
+  return { ok: true, scheduleRevision: scheduleRevision_(rows) };
 }
 
 function setOvertime_(ss, p) {
@@ -1534,9 +1825,12 @@ function setOvertime_(ss, p) {
     sheet.getRange(idx + 2, attrCol).setValue(targetRow['課堂屬性'] || '一般');
   } else {
     const col = SHEET_DEFS['課表'].headers.indexOf('課堂屬性') + 1;
-    sheet.getRange(idx + 2, col).setValue(isOvertime ? '超鐘點' : '一般');
+    const nextAttr = isOvertime ? '超鐘點' : '一般';
+    sheet.getRange(idx + 2, col).setValue(nextAttr);
+    targetRow['課堂屬性'] = nextAttr;
   }
-  return { ok: true, isOvertime: isOvertime, teacherCode: targetTeacher, scheduleRevision: scheduleRevision_(sheetToObjects_(sheet)) };
+  if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, p);
+  return { ok: true, isOvertime: isOvertime, teacherCode: targetTeacher, scheduleRevision: scheduleRevision_(rows) };
 }
 
 function batchSetOvertime_(ss, p) {
@@ -1599,7 +1893,8 @@ function batchSetOvertime_(ss, p) {
     const values = headers.map(header => rows[index][header] !== undefined ? rows[index][header] : '');
     sheet.getRange(index + 2, 1, 1, values.length).setValues([values]);
   });
-  return { ok: true, changed: changedRows.size, scheduleRevision: scheduleRevision_(sheetToObjects_(sheet)) };
+  if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, p);
+  return { ok: true, changed: changedRows.size, scheduleRevision: scheduleRevision_(rows) };
 }
 
 // ===================== 設定資料 =====================
@@ -1744,6 +2039,9 @@ function renameTeacher_(ss, p) {
   update('課表', ['教師姓名']);
   update('不排課', ['教師姓名']);
   update('互斥', ['教師A', '教師B']);
+  update('寒暑輔-需求', ['教師姓名']);
+  update('寒暑輔-停排', ['教師姓名']);
+  update('寒暑輔-課表', ['教師姓名']);
   return { oldKey, newKey, updatedRows };
 }
 function numericStringToText_(v) {
@@ -1764,7 +2062,7 @@ function deleteMeta_(ss, p) {
 // ===================== 科目時段規則 =====================
 
 function saveSubjectRule_(ss, p) {
-  // p: { subjectCode(s), classCode(s), grade, type:'必排'|'禁排', clear, pairs? }
+  // p: { subjectCode(s), classCode(s), grade, type:'必排'|'禁排', clear, pairs?, replaceRuleId? }
   // pairs 格式為 "day-period,day-period"（如 "1-2,3-4" 表示週一第2節、週三第4節）
   const sheet  = ss.getSheetByName('科目規則');
   const rows   = sheetToObjects_(sheet);
@@ -1777,25 +2075,51 @@ function saveSubjectRule_(ss, p) {
   if (subjectCodes.length === 0) throw new Error('至少要選擇一個科目');
   if (type !== '必排' && type !== '禁排') throw new Error('規則類型不正確');
 
+  const replaceRuleId = String(p.replaceRuleId || '').trim();
+  const workingRows = rows.slice();
+  if (replaceRuleId) {
+    for (let i = workingRows.length - 1; i >= 0; i--) {
+      if (String(workingRows[i]['規則ID'] || '').trim() === replaceRuleId) {
+        sheet.deleteRow(i + 2);
+        workingRows.splice(i, 1);
+      }
+    }
+  }
+
   if (p.clear) {
     let removed = 0;
-    for (let i = rows.length - 1; i >= 0; i--) {
-      const r = rows[i];
+    for (let i = workingRows.length - 1; i >= 0; i--) {
+      const r = workingRows[i];
       if (sameSubjectRuleList_(r['科目代碼'], subjectCodes) &&
           sameSubjectRuleList_(r['適用班級'], classCodes) &&
           String(r['適用年級'] || '全校').trim() === gradeStr &&
           String(r['規則類型'] || '').trim() === type &&
           (!p.pairs || String(r['時段'] || '') === String(p.pairs))) {
         sheet.deleteRow(i + 2);
+        workingRows.splice(i, 1);
         removed++;
       }
     }
-    return { ok: true, removed };
+    if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, p);
+    return { ok: true, removed, subjectRules: workingRows };
   }
+  let createdId = '';
   if (p.pairs) {
-    sheet.appendRow([genId_(), subjectStr, gradeStr, classStr, p.pairs, type, '']);
+    createdId = String(p.id || '').trim() || genId_();
+    const newObj = {
+      '規則ID': createdId,
+      '科目代碼': subjectStr,
+      '適用年級': gradeStr,
+      '適用班級': classStr,
+      '時段': p.pairs,
+      '規則類型': type,
+      '備註': String(p.remark || '')
+    };
+    sheet.appendRow([newObj['規則ID'], subjectStr, gradeStr, classStr, p.pairs, type, newObj['備註']]);
+    workingRows.push(newObj);
   }
-  return { ok: true };
+  if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, p);
+  return { ok: true, id: createdId, subjectRules: workingRows };
 }
 
 function saveSubjectRelation_(ss, p) {
@@ -3296,34 +3620,84 @@ function batchUpdateScheduleLocked_(ss, payload) {
     }
   }
 
-  if (sheet.getLastRow() > 1) {
-    sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).clearContent();
+  const existingCount = Math.max(0, sheet.getLastRow() - 1);
+  if (schedule.length === 0) {
+    if (existingCount > 0) {
+      sheet.getRange(2, 1, existingCount, headers.length).clearContent();
+    }
+    invalidateCacheIfDirect_(ss, payload);
+    return { count: 0, scheduleRevision: scheduleRevision_([]) };
   }
 
-  if (schedule.length === 0) return { count: 0, scheduleRevision: scheduleRevision_([]) };
-
+  const virtualClassMap = classRows.reduce((map, row) => {
+    map[String(row['班級代碼'] || '').trim()] = row;
+    return map;
+  }, {});
+  const nextObjects = [];
   const rows = schedule.map(r => {
     const period = parseInt(r['節次'], 10);
-    const attr = isManualOnlyPeriod_(period) || isVirtualClassRow_(classRows.reduce((map, row) => {
-      map[String(row['班級代碼'] || '').trim()] = row;
-      return map;
-    }, {}), r['班級代碼'])
+    const attr = isManualOnlyPeriod_(period) || isVirtualClassRow_(virtualClassMap, r['班級代碼'])
       ? '抽離'
       : String(r['課堂屬性'] || '一般');
-    return [
-      r['課表ID'] || genId_(),
-      String(r['班級代碼'] || ''),
-      parseInt(r['星期'], 10),
-      period,
-      String(r['科目代碼'] || ''),
-      (Array.isArray(r['教師姓名']) ? JSON.stringify(r['教師姓名']) : String(r['教師姓名'] || '')),
-      attr,
-      (r['是否鎖定'] === 'TRUE' || r['是否鎖定'] === true) ? 'TRUE' : 'FALSE'
-    ];
+    const id = r['課表ID'] || genId_();
+    const cls = String(r['班級代碼'] || '');
+    const day = parseInt(r['星期'], 10);
+    const subj = String(r['科目代碼'] || '');
+    const teacher = Array.isArray(r['教師姓名']) ? JSON.stringify(r['教師姓名']) : String(r['教師姓名'] || '');
+    const locked = (r['是否鎖定'] === 'TRUE' || r['是否鎖定'] === true) ? 'TRUE' : 'FALSE';
+    nextObjects.push({
+      '課表ID': id,
+      '班級代碼': cls,
+      '星期': day,
+      '節次': period,
+      '科目代碼': subj,
+      '教師姓名': teacher,
+      '課堂屬性': attr,
+      '是否鎖定': locked
+    });
+    return [id, cls, day, period, subj, teacher, attr, locked];
   });
 
+  const canDiffWrite = existingCount === rows.length && currentRows.length === rows.length;
+  if (canDiffWrite) {
+    const changedIndices = [];
+    for (let i = 0; i < rows.length; i++) {
+      const prev = currentRows[i];
+      const rowArr = rows[i];
+      let differs = false;
+      for (let c = 0; c < headers.length; c++) {
+        if (String(prev[headers[c]] == null ? '' : prev[headers[c]]) !== String(rowArr[c] == null ? '' : rowArr[c])) {
+          differs = true;
+          break;
+        }
+      }
+      if (differs) changedIndices.push(i);
+    }
+    if (changedIndices.length === 0) {
+      return { count: rows.length, scheduleRevision: scheduleRevision_(nextObjects) };
+    }
+    const spans = [];
+    changedIndices.forEach(idx => {
+      const last = spans[spans.length - 1];
+      if (last && last.start + last.count === idx) last.count++;
+      else spans.push({ start: idx, count: 1 });
+    });
+    if (spans.length <= 4 && changedIndices.length <= 8) {
+      spans.forEach(span => {
+        sheet.getRange(span.start + 2, 1, span.count, headers.length)
+          .setValues(rows.slice(span.start, span.start + span.count));
+      });
+      invalidateCacheIfDirect_(ss, payload);
+      return { count: rows.length, scheduleRevision: scheduleRevision_(nextObjects) };
+    }
+  }
+
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
-  return { count: rows.length, scheduleRevision: scheduleRevision_(sheetToObjects_(sheet)) };
+  if (existingCount > rows.length) {
+    sheet.getRange(rows.length + 2, 1, existingCount - rows.length, headers.length).clearContent();
+  }
+  if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, payload);
+  return { count: rows.length, scheduleRevision: scheduleRevision_(nextObjects) };
 }
 
 // ===== 教師不排課：集中時段陣列（僅限新版資料） =====
@@ -3350,6 +3724,13 @@ function teacherBlockHasSlot_(block, teacherCode, day, period) {
 function saveTeacherBlock_(ss, payload) {
   const sheet = ss.getSheetByName('不排課');
   const pairs = parseTeacherBlockPairs_(payload.pairs);
+  const replaceId = String(payload.replaceBlockId || '').trim();
+  if (replaceId && sheet.getLastRow() >= 2) {
+    const idValues = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+    for (let i = idValues.length - 1; i >= 0; i--) {
+      if (String(idValues[i][0] || '').trim() === replaceId) sheet.deleteRow(i + 2);
+    }
+  }
   const lastRow = sheet.getLastRow();
   const codeRowNos = {}; // 教師代碼 -> 既有資料列號（以 1 為基準的資料列）
   const currentReason = {};
@@ -3362,6 +3743,8 @@ function saveTeacherBlock_(ss, payload) {
       if (!(code in codeRowNos)) { codeRowNos[code] = i + 2; currentReason[code] = String(values[i][3] || ''); }
     }
   }
+  const rowsToDelete = [];
+  const newBlocksToAppend = [];
   (payload.teacherCodes || []).forEach(teacherCode => {
     const tc = String(teacherCode);
     const existingRow = codeRowNos[tc] || null;
@@ -3377,11 +3760,14 @@ function saveTeacherBlock_(ss, payload) {
         sheet.getRange(existingRow, 3).setValue(finalPairs.join(','));
         sheet.getRange(existingRow, 4).setValue(reason);
       } else {
-        sheet.deleteRow(existingRow);
+        rowsToDelete.push(existingRow);
       }
     } else if (finalPairs.length) {
-      sheet.appendRow([genId_(), tc, finalPairs.join(','), reason]);
+      newBlocksToAppend.push({ tc, pairsStr: finalPairs.join(','), reason });
     }
   });
-  return {ok:true};
+  rowsToDelete.sort((a, b) => b - a).forEach(rowNo => sheet.deleteRow(rowNo));
+  newBlocksToAppend.forEach(({ tc, pairsStr, reason }) => sheet.appendRow([genId_(), tc, pairsStr, reason]));
+  if (typeof invalidateCacheIfDirect_ === 'function') invalidateCacheIfDirect_(ss, payload);
+  return { ok: true, teacherBlocks: sheetToObjects_(sheet) };
 }

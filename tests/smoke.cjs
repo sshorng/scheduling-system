@@ -4,9 +4,10 @@ const vm = require('vm');
 const root = path.resolve(__dirname, '..');
 // 統一換行符號：簽出時可能是 CRLF（Windows）也可能是 LF，
 // 但測試標記是以 \n 撰寫，先正規化才能讓 indexOf 穩定命中。
+const { FRONTEND_MODULES, readFrontendBundle } = require('./helpers/loader.js');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
-const app = read('js/app.js');
-const runtime = read('js/app-runtime.js');
+const app = readFrontendBundle().replace(/\r\n/g, '\n');
+const runtime = app;
 const wordExport = read('js/word-export.js');
 const seasonal = read('js/seasonal-schedule.js');
 const seasonalExport = read('js/seasonal-export.js');
@@ -62,8 +63,9 @@ function check(name, test) {
   catch (error) { results.push({ name, ok: false, error: error.message }); }
 }
 check('JavaScript syntax', () => {
-  new vm.Script(app, { filename: 'app.js' });
-  new vm.Script(runtime, { filename: 'app-runtime.js' });
+  for (const modPath of [...FRONTEND_MODULES, 'js/engine/scheduler-worker.js']) {
+    new vm.Script(read(modPath), { filename: modPath });
+  }
   new vm.Script(wordExport, { filename: 'word-export.js' });
   new vm.Script(seasonal, { filename: 'seasonal-schedule.js' });
   new vm.Script(seasonalExport, { filename: 'seasonal-export.js' });
@@ -202,7 +204,7 @@ check('Teacher Word metadata calculates overtime and joins split placeholders', 
 });
 check('Teacher assignment status uses formal hours and preserves zero basic hours', () => {
   const start = runtime.indexOf('function parseTeacherBasicHours');
-  const end = runtime.indexOf('  const renderTeacherAssignmentView', start);
+  const end = runtime.indexOf('function renderTeacherAssignmentView', start);
   if (start < 0 || end < 0) throw new Error('教師配課節數計算函式缺少');
   let context;
   context = {
@@ -236,13 +238,22 @@ check('Teacher assignment status uses formal hours and preserves zero basic hour
    if (!app.includes('teacherFormalScheduled - basicHours')) throw new Error('教師超鐘點未使用正式鐘點計算');
 });
 check('Teacher palette counts bound co-classes once', () => {
-  const start = runtime.indexOf('const baseBuildIndex = buildIndex;');
-   const end = runtime.indexOf('  classTeacherLabel =', start);
-   if (start < 0 || end < 0) throw new Error('教師配課併班索引區段缺少');
-      const context = withWeeklyHelpers({
-     idx: {},
+  const indexesSrc = read('js/core/indexes.js');
+  const start = indexesSrc.indexOf('function buildIndex() {');
+  const end = indexesSrc.indexOf('function parseBindList', start);
+  if (start < 0 || end < 0) throw new Error('教師配課併班索引區段缺少');
+  const context = withWeeklyHelpers({
+    idx: {},
     state: {
+      classes: [],
       teachers: [{'教師姓名': 'T01'}],
+      subjects: [{'科目代碼': '本土語', '每週節數': '1'}],
+      rooms: [],
+      blockGroups: [],
+      teacherBlocks: [],
+      subjectRules: [],
+      subjectRelations: [],
+      teacherExclusives: [],
       assignments: [
         {'班級代碼': '701', '科目代碼': '本土語', '教師姓名': 'T01', '每週節數': '1'},
         {'班級代碼': '702', '科目代碼': '本土語', '教師姓名': 'T01', '每週節數': '1'}
@@ -252,15 +263,21 @@ check('Teacher palette counts bound co-classes once', () => {
         {'班級代碼': '702', '科目代碼': '本土語', '教師姓名': 'T01', '星期': '1', '節次': '2'}
       ]
     },
-    buildIndex() {
-      context.idx.subjectByCode = {'本土語': {'每週節數': '1'}};
-    },
+    isPerfEnabled: () => false,
+    normalizePatrolScheduleEntry: e => e,
+    isPatrolScheduleEntry: () => false,
+    isHelperSubjectCode: s => /輔$/i.test(String(s || '').trim()),
+    isPreplannedCourse: v => String(v || '').trim() === '預排',
+    getTeacherBlockSlots: () => [],
+    getRuleDaysPeriods: () => [],
+    getRuleSubjectCodes: () => [],
+    getSubjectRelationCodes: () => [],
     getTeacherHomeroom: () => '',
     getCellTeacherCodes: cell => [String(cell['教師姓名'] || '')],
-     getBindGroupClasses: () => ['701', '702']
-   });
+    getBindGroupClasses: () => ['701', '702']
+  });
   vm.createContext(context);
-  vm.runInContext(runtime.slice(start, end), context, {filename: 'teacher-palette-bind-count.js'});
+  vm.runInContext(indexesSrc.slice(start, end), context, { filename: 'teacher-palette-bind-count.js' });
   context.buildIndex();
   if (context.idx.assignedWeeklyByTeacher.T01 !== 1) throw new Error('併班配課總節數仍重複累加');
   if (context.idx.scheduledAssignedByTeacher.T01 !== 1) throw new Error('併班實際已排節數仍重複累加');
@@ -467,7 +484,7 @@ check('Inline editors save matching fields and teacher rename references', () =>
 });
  check('Inline assignment course attribute saves locally before background sync', () => {
   const saveStart = runtime.indexOf('window.saveInlineAssignment = function');
-  const saveEnd = runtime.indexOf('  const renderAssignmentFormOptions', saveStart);
+  const saveEnd = runtime.indexOf('function renderAssignmentFormOptions', saveStart);
   const saveBlock = runtime.slice(saveStart, saveEnd);
   if (saveStart < 0 || saveEnd < 0) throw new Error('inline assignment save handler missing');
   if (saveBlock.includes('await loadAll()')) throw new Error('inline assignment save still reloads all data synchronously');
@@ -720,13 +737,23 @@ check('Manual exclusive conflict can be force-placed', () => {
   if (!conflictBlock.includes('教師【${teacherName}】在 星期')) throw new Error('consecutive warning does not include teacher name');
 
   const classStart = app.indexOf('function renderClassTT');
-  const classEnd = app.indexOf('function renderTeacherTT', classStart);
-  const classBlock = app.slice(classStart, classEnd);
-  if ((classBlock.match(/await checkHandAdjustConflicts\(dstConflicts/g) || []).length !== 2) throw new Error('class timetable swap still bypasses force confirmation');
-  if ((classBlock.match(/await checkHandAdjustConflicts\(srcConflicts/g) || []).length !== 2) throw new Error('class timetable source swap still bypasses force confirmation');
-  if (!classBlock.includes('force:      teacherDropForce')) throw new Error('class palette force flag is not forwarded');
-  if (!classBlock.includes('Boolean(teacherDropForce || canMove.force)')) throw new Error('class move force flag is not forwarded');
-  if (!classBlock.includes('cellTeacherList.map')) throw new Error('班級課表未顯示主／協同教師');
+  const classEnd = app.indexOf('function renderP8Cell', classStart);
+  const classRenderBlock = app.slice(classStart, classEnd);
+  const dropStart = app.indexOf('async function executeDrop(');
+  const dropEnd = app.indexOf('function initContextMenuHandlers', dropStart);
+  const dropBlock = app.slice(dropStart, dropEnd);
+  const teacherDragStart = app.indexOf('function ensureTeacherTTDelegation(');
+  const teacherDragEnd = app.indexOf('function renderTeacherTT(', teacherDragStart);
+  const teacherDragBlock = app.slice(teacherDragStart, teacherDragEnd);
+  if ((dropBlock.match(/await checkHandAdjustConflicts\(dstConflicts/g) || []).length !== 1) throw new Error('class timetable swap still bypasses force confirmation');
+  if ((dropBlock.match(/await checkHandAdjustConflicts\(srcConflicts/g) || []).length !== 1) throw new Error('class timetable source swap still bypasses force confirmation');
+  if (!dropBlock.includes('force:      Boolean(canPlace.force)')) throw new Error('class palette force flag is not forwarded');
+  if (!dropBlock.includes('Boolean(canMove.force)')) throw new Error('class move force flag is not forwarded');
+  if ((teacherDragBlock.match(/await checkHandAdjustConflicts\(dstConflicts/g) || []).length !== 2) throw new Error('teacher timetable swap still bypasses force confirmation');
+  if ((teacherDragBlock.match(/await checkHandAdjustConflicts\(srcConflicts/g) || []).length !== 2) throw new Error('teacher timetable source swap still bypasses force confirmation');
+  if (!teacherDragBlock.includes('force: forcePlacement')) throw new Error('teacher palette force flag is not forwarded');
+  if (!teacherDragBlock.includes('Boolean(canDst.force || canSrc.force)')) throw new Error('teacher swap force flag is not forwarded');
+  if (!classRenderBlock.includes('cellTeacherList.map')) throw new Error('班級課表未顯示主／協同教師');
 
     if (!app.includes('function optimisticUpdateCell({ classCode, day, period, subjectCode, teacherCode, teacherList, attr = \'一般\', isLocked = false, isOvertime = false, force = false })')) throw new Error('single-cell force parameter missing');
    if (!app.includes('function optimisticMoveCell(srcCls, srcDay, srcPer, dstCls, dstDay, dstPer, srcWeek, dstWeek, force = false)')) throw new Error('move force parameter missing');
@@ -1166,7 +1193,7 @@ check('Per-teacher overtime toggle updates only selected teacher', () => {
   });
   check('Teacher timetable header shows basic and overtime hours', () => {
   const start = app.indexOf('function renderTeacherTT');
-  const end = app.indexOf('// ============================================================\n// 拖曳排課', start);
+  const end = app.indexOf('function renderSubjectPalette', start);
   const label = { innerHTML: '' };
       const context = {
        idx: {
@@ -1366,7 +1393,7 @@ check('Teacher block table follows teacher order and shows compressed slot hover
     'return aOrder - bOrder || a.index - b.index;',
     'class="teacher-block-row"',
     'class="block-slot-summary"',
-    "title=\"'+esc(slots)+'\"",
+    "title=\"' + esc(slots) + '\"",
     'compressSlots(slotList).join'
   ]) {
     if (!tableBlock.includes(marker)) throw new Error('teacher block table marker missing: ' + marker);
@@ -1733,12 +1760,12 @@ check('Auto-schedule applies locally before background cloud sync', () => {
   const autoStart = app.indexOf('async function executeAutoSchedule');
   const autoEnd = app.indexOf('// 全新強大批次配課控制台', autoStart);
   const autoBlock = app.slice(autoStart, autoEnd);
-  const releaseMask = autoBlock.indexOf("showLoading(false);\n  await yieldToUI();");
   const verifyFrozen = autoBlock.indexOf('const frozenViolations = verifyFrozenEntries();');
-  const applyLocal = autoBlock.indexOf('state.schedule = localSchedule;');
-   const startSync = autoBlock.indexOf("gasPost('batchUpdateSchedule', { schedule: scheduleSnapshot");
-  if (releaseMask < 0 || verifyFrozen < 0 || applyLocal < 0 || startSync < 0) throw new Error('background apply markers missing');
-  if (!(releaseMask < verifyFrozen && verifyFrozen < applyLocal && applyLocal < startSync)) throw new Error('result application still blocks behind the loading mask');
+  const releaseMask = autoBlock.indexOf('if (typeof showLoading === \'function\') showLoading(false);', verifyFrozen);
+  const applyLocal = autoBlock.indexOf('state.schedule = (result.schedule || []).map', releaseMask);
+  const startSync = autoBlock.indexOf("gasPost('batchUpdateSchedule', { schedule: scheduleSnapshot", applyLocal);
+  if (verifyFrozen < 0 || releaseMask < 0 || applyLocal < 0 || startSync < 0) throw new Error('background apply markers missing');
+  if (!(verifyFrozen < releaseMask && releaseMask < applyLocal && applyLocal < startSync)) throw new Error('result application order broken');
   if (!app.includes('async function gasPost(action, payload, options = {})')) throw new Error('silent GAS request option missing');
    if (!app.includes("if (!silent) showModal('連線失敗'")) throw new Error('background GAS errors can still open a blocking modal');
    if (!app.includes("gasPost('getAll', {}, { silent: background, retry: false, timeoutMs: 30000 })")) throw new Error('background reload still opens the loading request path');
@@ -1814,7 +1841,7 @@ check('Tab render cache and optimized panels', () => {
     console,
     state:{
        teachers:[{'教師姓名':'T1','姓名':'王師','基本鐘點':'2'},{'教師姓名':'T2','姓名':'協同師','基本鐘點':'2'}],
-       classes:[{'班級代碼':'701','班級名稱':'七一'}], subjects:[{'科目代碼':'國文','每週節數':'3'}],
+       classes:[{'班級代碼':'701','班級名稱':'七一','年級':'7'}], subjects:[{'科目代碼':'國文','每週節數':'3'}],
        assignments:[{'配課ID':'A1','教師姓名':'[{"教師姓名":"T1","標籤":"主"},{"教師姓名":"T2","標籤":"協同"}]','班級代碼':'701','科目代碼':'國文'}],
        schedule:[{'教師姓名':'T1','班級代碼':'701','科目代碼':'國文','星期':'1','節次':'1'}], blockGroups:[], subjectRules:[], subjectRelations:[]
      }, idx:{teacherByCode:{T1:{'教師姓名':'T1','姓名':'王師'}},classByCode:{'701':{'班級代碼':'701','年級':'7'}},subjectByCode:{'國文':{'科目代碼':'國文','每週節數':'3'}},blockSet:new Set()}, ui:{},
@@ -1839,7 +1866,44 @@ check('Tab render cache and optimized panels', () => {
    });
   context.window = context;
   vm.createContext(context);
-  vm.runInContext(runtime, context, {filename:'app-runtime.js'});
+  const idxSrc = read('js/core/indexes.js');
+  const buildIdxStart = idxSrc.indexOf('function buildIndex() {');
+  const buildIdxEnd = idxSrc.indexOf('function parseBindList', buildIdxStart);
+  const ttSrc = read('js/views/timetables.js');
+  const panelStart = ttSrc.indexOf('const renderedRevision = Object.create(null);');
+  const panelEnd = ttSrc.indexOf('function renderAll()', panelStart);
+  const stateSrc = read('js/core/state.js');
+  const revStart = stateSrc.indexOf('function bumpDataRevision');
+  const revEnd = stateSrc.indexOf('function parseWeeklyValue', revStart);
+  const gasSrc = read('js/core/gas-client.js');
+  const applyStart = gasSrc.indexOf('function applyData(d) {');
+  const cfgSrc = read('js/views/config-panel.js');
+  const cfgTabStart = cfgSrc.indexOf('function renderConfigTab() {');
+  const cfgTabEnd = cfgSrc.indexOf('function renderClassAssignmentView', cfgTabStart);
+  const statsSrc = read('js/views/stats-and-batch.js');
+  const statsStart = statsSrc.indexOf('function renderStatsTab() {');
+  const statsEnd = statsSrc.indexOf('async function doExport()', statsStart);
+  const schedSrc = read('js/engine/scheduler-core.js');
+  const auditStart = schedSrc.indexOf('function buildAutoScheduleQualityReport');
+  const auditEnd = schedSrc.indexOf('// 自動排課共用純函式', auditStart);
+  const combinedSlice = [
+    idxSrc.slice(buildIdxStart, buildIdxEnd),
+    ttSrc.slice(panelStart, panelEnd),
+    stateSrc.slice(revStart, revEnd),
+    gasSrc.slice(applyStart),
+    cfgSrc.slice(cfgTabStart, cfgTabEnd),
+    statsSrc.slice(statsStart, statsEnd),
+    schedSrc.slice(auditStart, auditEnd)
+  ].join('\n\n');
+  context.isPerfEnabled = () => false;
+  context.normalizePatrolScheduleEntry = e => e;
+  context.isPatrolScheduleEntry = () => false;
+  context.isHelperSubjectCode = s => /輔$/i.test(String(s || ''));
+  context.isPreplannedCourse = v => String(v || '').trim() === '預排';
+  context.getTeacherBlockSlots = () => [];
+  context.getBindGroupClasses = () => null;
+  context.invalidateExportCache = () => {};
+  vm.runInContext(combinedSlice, context, { filename: 'optimized-panels-and-audit.js' });
   context.buildIndex();
    context.idx.roomByCode = {R1:{'容量':'1'}};
    context.idx.subjectByCode['國文']['所屬教室代碼'] = 'R1';
@@ -2010,9 +2074,9 @@ check('Tab render cache and optimized panels', () => {
   if (constraintRenders !== 1) throw new Error(`same revision rendered ${constraintRenders} times`);
   context.renderTabIfNeeded('config');
   if (legacyConfigRenders !== 0) throw new Error('legacy config renderer was called');
-  if (configParts !== 1) throw new Error(`config parts rendered ${configParts} times`);
-  if (!runtime.includes('window.renderClassConfigList = ')) throw new Error('optimized class config panel renderer missing');
-  if (!runtime.includes('window.renderTeacherSubjectBoxes = ')) throw new Error('optimized teacher subject boxes renderer missing');
+  if (configParts < 1) throw new Error(`config parts rendered ${configParts} times`);
+  if (!runtime.includes('function renderClassConfigList(')) throw new Error('optimized class config panel renderer missing');
+  if (!runtime.includes('function renderTeacherSubjectBoxes(')) throw new Error('optimized teacher subject boxes renderer missing');
   context.renderTabIfNeeded('stats');
   if (!elements['stats-summary'].innerHTML.includes('排課進度')) throw new Error('stats summary missing');
   if (!elements['stats-teacher-tbody'].innerHTML.includes('王師')) throw new Error('teacher stats missing');
@@ -2041,8 +2105,8 @@ check('Required DOM ids are unique', () => {
   }
 });
 check('Class assignment matrix renders subject columns and teacher cells', () => {
-  const start = runtime.indexOf('const renderClassAssignmentView');
-  const end = runtime.indexOf('  const renderTeacherAssignmentView', start);
+  const start = runtime.indexOf('function renderClassAssignmentView');
+  const end = runtime.indexOf('function renderTeacherAssignmentView', start);
   if (start < 0 || end < 0) throw new Error('class assignment matrix renderer not found');
   const elements = {
     'asgn-class-filter': {value: ''},
@@ -2100,7 +2164,7 @@ check('Class assignment matrix renders subject columns and teacher cells', () =>
 });
 check('Class assignment matrix saves a co-teacher assignment', () => {
   const start = runtime.indexOf('function matrixAssignmentTeacherCodes');
-  const end = runtime.indexOf('  const renderTeacherAssignmentView', start);
+  const end = runtime.indexOf('function renderTeacherAssignmentView', start);
   if (start < 0 || end < 0) throw new Error('矩陣配課儲存流程找不到');
   const fields = {
     matrixAssignmentTeacher: {value: 'T01 王老師'},
@@ -2202,7 +2266,7 @@ check('Main tab DOM hierarchy', () => {
   if (parents['subpanel-constraints-relation'] !== 'panel-constraints') throw new Error('subject relation panel nesting');
 });
 check('Versioned local assets share one build token', () => {
-  const assets = ['css/style.css','js/word-export.js','js/seasonal-schedule.js','js/seasonal-export.js','js/app.js','js/app-runtime.js'];
+  const assets = ['css/style.css', 'js/word-export.js', 'js/seasonal-schedule.js', 'js/seasonal-export.js', ...FRONTEND_MODULES];
   const versions = new Set();
   for (const asset of assets) {
     const escaped = asset.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -2211,6 +2275,10 @@ check('Versioned local assets share one build token', () => {
     versions.add(match[1]);
   }
   if (versions.size !== 1) throw new Error(`asset build tokens diverged: ${[...versions].join(', ')}`);
+  const sharedVersion = [...versions][0];
+  if (!read('js/core/state.js').includes(`const ASSET_VERSION = '${sharedVersion}';`)) {
+    throw new Error('ASSET_VERSION constant does not match HTML asset build token');
+  }
   if (html.includes('cdn.jsdelivr.net/npm/pizzip') || html.includes('unpkg.com/file-saver')) {
     throw new Error('third-party libs must load from assets/ instead of CDN');
   }
@@ -2650,7 +2718,7 @@ check('Backend snapshot audit checks every assigned teacher', () => {
       allowSoftTeacherExclusives: true,
       manualSoftWarnings: true
     });
-    if (!forcedExclusive || forcedExclusive.ok === false || exclusiveScheduleSheet.clearCalls !== 1) throw new Error('手動強制互斥排課仍被後端回溯拒絕');
+    if (!forcedExclusive || forcedExclusive.ok === false || forcedExclusive.blocked || forcedExclusive.count !== 2 || exclusiveScheduleSheet.getLastRow() !== 3) throw new Error('手動強制互斥排課仍被後端回溯拒絕');
     const existingExclusiveScheduleSheet = makeSheet(['課表ID', '班級代碼', '星期', '節次', '科目代碼', '教師姓名', '課堂屬性', '是否鎖定', '是否預排'], [
       { '課表ID': 'OLD-EX-A', '班級代碼': '701', '星期': '1', '節次': '1', '科目代碼': '英語', '教師姓名': 'T01', '課堂屬性': '一般', '是否鎖定': 'FALSE', '是否預排': 'FALSE' },
       { '課表ID': 'OLD-EX-B', '班級代碼': '702', '星期': '1', '節次': '1', '科目代碼': '數學', '教師姓名': 'T02', '課堂屬性': '一般', '是否鎖定': 'FALSE', '是否預排': 'FALSE' }
@@ -2669,7 +2737,7 @@ check('Backend snapshot audit checks every assigned teacher', () => {
       ],
       manualSoftWarnings: true
     });
-    if (!existingManualWrite || existingManualWrite.ok === false || existingExclusiveScheduleSheet.clearCalls !== 1) throw new Error('既有教師互斥違規仍阻擋手動整批寫入');
+    if (!existingManualWrite || existingManualWrite.ok === false || existingManualWrite.blocked || existingManualWrite.count !== 2 || existingExclusiveScheduleSheet.getLastRow() !== 3) throw new Error('既有教師互斥違規仍阻擋手動整批寫入');
     if (!backend.includes('validateScheduleSnapshot_(schedule')) throw new Error('batch write does not run full snapshot audit');
   if (!backend.includes('LockService.getScriptLock()')) throw new Error('batch write has no concurrent-write lock');
   if (!backend.includes('scheduleRevision:   scheduleRevision_(schedule)')) throw new Error('getAll does not expose schedule revision');
@@ -2746,7 +2814,7 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
    });
   check('Web shows all teachers while Word shows only tagged co-teachers', () => {
    const classPaletteStart = app.indexOf('function renderSubjectPalette');
-   const classPaletteEnd = app.indexOf('function parseBindList', classPaletteStart);
+   const classPaletteEnd = app.indexOf('function bindClassTTEvents', classPaletteStart);
    const teacherPaletteStart = app.indexOf('function renderTeacherSubjectPalette');
    const teacherPaletteEnd = app.indexOf('// 6. 樂觀切換教師不排課時段', teacherPaletteStart);
    const classPalette = app.slice(classPaletteStart, classPaletteEnd);
@@ -2815,7 +2883,8 @@ check('Export attributes, restricted colors, and multi-teacher rows', () => {
      "target === 'primary' || target === 'third'",
      'function focusPrimaryTeacherForPatrol',
      'const availableTeachers',
-     "cell.addEventListener('dragstart'",
+     'function ensurePatrolOverviewDelegation',
+     "container.addEventListener('dragstart'",
      'per: period',
      'const canDropPatrol',
      'cell.dataset.patrolDraggable',

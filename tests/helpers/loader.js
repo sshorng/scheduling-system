@@ -149,6 +149,9 @@ function createSandbox(options = {}) {
     btoa: value => Buffer.from(String(value), 'binary').toString('base64'),
     atob: value => Buffer.from(String(value), 'base64').toString('binary'),
     document,
+    Option: function Option(text = '', value = '') {
+      return { text: String(text), value: String(value), selected: false };
+    },
     localStorage,
     sessionStorage,
     navigator: { userAgent: 'node-tests', clipboard: {}, language: 'zh-TW' },
@@ -206,14 +209,34 @@ function options_timeout() {
   return 30000;
 }
 
+const FRONTEND_MODULES = [
+  'js/core/state.js',
+  'js/core/indexes.js',
+  'js/core/ui.js',
+  'js/core/gas-client.js',
+  'js/views/mutations.js',
+  'js/views/timetables.js',
+  'js/views/config-panel.js',
+  'js/views/constraints-panel.js',
+  'js/engine/scheduler-core.js',
+  'js/engine/scheduler-runner.js',
+  'js/views/stats-and-batch.js',
+  'js/bootstrap.js'
+];
+
+function readFrontendBundle() {
+  return FRONTEND_MODULES.map(relPath => readSource(relPath)).join('\n\n');
+}
+
 /**
- * 載入整份 app.js。回傳沙箱本體，之後可直接呼叫 ctx.detectConflicts(...) 等。
+ * 載入完整前端模組（按 HTML 載入順序）。回傳沙箱本體，之後可直接呼叫 ctx.detectConflicts(...) 等。
  * 這是測試取得真實函式的正規途徑。
  */
 function loadApp(options = {}) {
   const sandbox = createSandbox(options);
-  const source = readSource('js/app.js');
-  vm.runInContext(source, sandbox, { filename: 'app.js', timeout: 30000 });
+  for (const relPath of FRONTEND_MODULES) {
+    vm.runInContext(readSource(relPath), sandbox, { filename: relPath, timeout: 30000 });
+  }
   return sandbox;
 }
 
@@ -348,6 +371,8 @@ function createLockStub(acquired = true) {
 
 module.exports = {
   ROOT,
+  FRONTEND_MODULES,
+  readFrontendBundle,
   readSource,
   makeElement,
   makeDocument,
